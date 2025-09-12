@@ -5,7 +5,7 @@ Test that database access enforcement works correctly.
 import sqlite3
 from core.types import command, validator, projector
 from core.query import query
-from core.readonly_db import ReadOnlyConnection
+from core.db import ReadOnlyConnection
 
 
 def test_command_no_db():

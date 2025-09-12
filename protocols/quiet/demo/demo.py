@@ -29,7 +29,7 @@ from enum import Enum
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.api_client import APIClient, APIError
+from core.api import API, APIClient, APIError  # APIClient is alias for backward compatibility
 
 # For CLI testing mode
 import argparse
@@ -86,8 +86,9 @@ class QuietDemoCore:
     """Core business logic for Quiet demo. No UI dependencies."""
     
     def __init__(self, reset_db: bool = True):
-        # Use direct API client (no HTTP)
-        self.api = APIClient(protocol_dir=Path(__file__).parent.parent, reset_db=reset_db)
+        # Use direct API client (no HTTP) with explicit protocol directory
+        protocol_dir = Path(__file__).parent.parent  # protocols/quiet
+        self.api = APIClient(protocol_dir=protocol_dir, reset_db=reset_db)
         
         # Panel states (1-4) 
         self.panels = {i: PanelState() for i in range(1, 5)}

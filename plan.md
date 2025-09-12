@@ -19,7 +19,7 @@ I'm curious if the following design will be simpler:
 - No protocol-specific fields in `/core`: protocols define everything.
 - No dict or in-memory persistence for anything: all data is stored in SQL, compatible with their being 10M envelopes.
 - Self-QA the runner by running it in CLI and reading output (later we will hook this up to a demo.py TUI app)
-- The only envelope id is encrypted_event_id (blake2b of hash of event ciphertext). Many envelopes (transit e.g.) will not have id's for some part of their lifecycle.  
+- The only envelope id is event_id (blake2b-16 hash of the complete signed event plaintext in its canonical 512-byte form). This matches ideal_protocol_design.md where events are 512 bytes and id(evt) = crypto_generichash(16, evt).  
 - No protocol event types should read or write the db ever. Projectors just emit deltas and framework handles it. Everything in event types is a pure function.
 - Commands are pure functions that emit envelopes with dependency declarations, not with resolved data
 - Handlers are pure functions that transform envelopes without database access
@@ -82,18 +82,25 @@ envelope = {
 
 The `resolve_deps` handler:
 1. Reads the `deps` array
-2. Fetches each dependency from validated events
+2. For each dependency:
+   - Fetches validated events from the database
+   - For identity dependencies, ALSO includes local_metadata (private keys) from a separate local storage
+   - For transit/key dependencies, may include local secrets that were never events
 3. Adds them to `resolved_deps`:
 ```python
 envelope["resolved_deps"] = {
     "identity:identity_abc123": {
-        "event_plaintext": {"type": "identity", "peer_id": "..."},
-        "local_metadata": {"private_key": "..."}  # Included for identities
+        "event_plaintext": {"type": "identity", "peer_id": "..."},  # From validated events
+        "local_metadata": {"private_key": "..."}  # From local secret storage, NOT an event
+    },
+    "transit_key:xyz789": {
+        "transit_secret": "...",  # Local secret, never was an event
+        "network_id": "..."
     }
 }
 ```
 
-Subsequent handlers can then use resolved dependencies as pure functions without database access.
+Note: Local secrets (private keys, transit secrets) are stored separately and are NEVER events that go through validation. They are only included in resolved_deps for local use and are stripped before any network transmission.
 
 ## Local Metadata
 
@@ -101,53 +108,549 @@ Subsequent handlers can then use resolved dependencies as pure functions without
 - Contains sensitive local information (e.g., private keys)
 - Is never sent over the network
 - Is included when resolving dependencies for local operations
-- Is stored locally but stripped by the strip_for_send handler before transmission
+- Is stored locally but never sent over the network (enforced by type system)
+
+# Type Definitions
+
+## Dependency Types
+
+```typescript
+// Base validated event
+interface ValidatedEvent {
+  event_plaintext: object
+  event_type: string
+  event_id: string
+  validated: true
+}
+
+// Identity with optional local private key
+interface IdentityDep extends ValidatedEvent {
+  event_type: "identity"
+  local_metadata?: { private_key: bytes }
+}
+
+// Transit key (local secret, not an event)
+interface TransitKeyDep {
+  transit_secret: bytes
+  network_id: string
+}
+
+// Address for routing
+interface AddressDep {
+  ip: string
+  port: number
+  public_key?: string
+}
+
+// Union of all dependency types
+type ResolvedDep = ValidatedEvent | IdentityDep | TransitKeyDep | AddressDep
+
+// Key reference with explicit type discrimination
+interface PeerKeyRef {
+  kind: "peer"
+  id: string  // peer_id for KEM-sealed to identity/prekey
+}
+
+interface GroupKeyRef {
+  kind: "key"
+  id: string  // key event_id for symmetric encryption
+}
+
+type KeyRef = PeerKeyRef | GroupKeyRef
+
+// Strict type for outgoing network data
+interface OutgoingTransitEnvelope {
+  transit_ciphertext: bytes
+  transit_key_id: string
+  dest_ip: string
+  dest_port: number
+  due_ms?: number
+  // No other fields allowed - enforces no leaks
+}
+```
 
 # Pipelines
 
-Handlers use filters to subscribe to the eventbus. We use these to create pipelines. 
+Handlers use filters to subscribe to the eventbus. We use these to create pipelines. Each handler transforms envelopes by adding, modifying, or removing fields.
 
-## Incoming Pipeline:
+## Incoming Pipeline: Network → Validated Storage
 
-- `receive_from_network` processes envelopes from the network interface with origin_ip, origin_port, received_at, and raw_data and emits envelopes with transit_key and transit_ciphertext
-- `resolve_deps` processes all envelopes where `deps_included_and_valid` is false or `unblocked: True` and and emits envelopes with `missing_deps: True` and a list of missing deps, or with `deps_included_and_valid: True`, with all of the deps included in the envelope, pulling deps only from already-validated events and ignoring not-yet-validated events. Keys are revered to by hash of event and resolved with any other deps. 
-- `decrypt_transit` consumes envelopes with `deps_included_and_valid` and `transit-key-id` and `transit_ciphertext` and no `event-key-id` or `event-ciphertext`, and uses the included `transit-key-id` dep which includes its validated envelope (which in turn includes the unwrapped secret and `network-id`) (from `resolve_deps`) to decrypt the `transit_ciphertext` and add `transit-plaintext` and the `network-id` associated with the key, and the `event_key_id` and `event_ciphertext`, and the `event_id` (blake2b hash of event ciphertext) to the emitted envelope. It emits another identical envelope with `write_to_store: True`.
-- `remove` consumes envelopes where `event_id` exists and `should_remove` is not false, calls all Removers for each event type, and drops/purges the envelope if any returns True, else it emits the envelope with `should_remove: False`.
-- `unseal_key` consumes envelopes where `deps_included_and_valid` and `should_remove: False` and the `event_key_id` is a `peer-id` with a public key, and it emits an envelope with a `key` event_type, its `key_id` (hash of the event), and its unsealed secret, and `group-id`. It emits another envelope with `write_to_store: True`.
-- `decrypt_event` consumes envelopes where `deps_included_and_valid` and `should_remove: False` the `event_key_id` points to a `key_id` and `event_plaintext` is empty and emits envelopes with a full `event_plaintext` extracting the `event_type` and adding that to the envelope too. It emits another identical envelope with `write_to_store: True`.
-- `event_store` consumes envelopes with `write_to_store: True` and saves them.
+Note: an alternate version of this would let framework store and return events, fetch valid deps, and block/unblock deps.
 
-*note that `deps_included_and_valid` gets reset to false by any handler that adds deps* 
+### 1. receive_from_network
+- **Input Type:**
+  ```typescript
+  interface NetworkData {
+    origin_ip: string
+    origin_port: number
+    received_at: number
+    raw_data: bytes
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface TransitEnvelope {
+    transit_key_id: string
+    transit_ciphertext: bytes
+    origin_ip: string
+    origin_port: number
+    received_at: number  // Preserve timestamp!
+    deps: string[]  // Added: ["transit_key:{transit_key_id}"]
+  }
+  ```
+- **Filter:** Has `origin_ip`, `origin_port`, `received_at`, `raw_data`
+- **Transform:** Parses raw_data to extract transit encryption fields, preserves metadata, adds deps array
 
-- `check_sig` consumes envelopes where `sig_checked` is false or absent, with their full `peer-id` dep (the public key they claim to be signing with), and emits envelopes with `sig_checked: True` if the signature verifies, and adds an error message to the envelope if not. *note that we check sigs on key events too* 
-- `check_group_membership` consumes envelopes with a `group-id` where `is_group_member` is false or absent. All events with `group-id` also include `group-member-id` which points to a valid `group-member` event adding them as a member and checks that the `user_id` of the event matches the `group_member_id` and that `group_member_id` matches `group_id`. Then it emits an envelope with `is_group_member: True`
-- `prevalidate` consumes envelopes with `event_plaintext`, `event_type`, `sig_checked: True`, `is_group_member: True` and it emits envelopes with `prevalidated: True`.
-- `validate` consumes `prevalidated` events, uses a validator for the corresponding event type as a predicate, and emit envelopes with `validated: True` and all event data in the envelope.
-- `unblock-deps` consumes all `validated` events and all `missing_deps` events and keeps a SQL table of `blocked_by` and when it consumes an event whose id is in `blocked_by` it emits the event with `unblocked: True`. 
-- Projectors for each event type consume all `validated` envelopes for that event type, call apply(deltas) and emit envelopes with `projected: True` and deltas (`op: ___`)
+### 2. resolve_deps (First Pass)
+- **Input Type:**
+  ```typescript
+  interface NeedsDepsEnvelope {
+    deps?: string[]
+    deps_included_and_valid?: boolean | false
+    unblocked?: boolean
+    [key: string]: any
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface ResolvedDepsEnvelope {
+    deps_included_and_valid: true
+    resolved_deps: Record<string, ResolvedDep>
+    [key: string]: any
+  } | {
+    missing_deps: true
+    missing_dep_list: string[]
+    [key: string]: any
+  }
+  ```
+- **Filter:** `deps` exists AND (`deps_included_and_valid` is false OR `unblocked: true`)
+- **Note:** Only resolves from already-validated events. Keeps resolved_deps in envelope for reuse.
 
-## Creation Pipeline
+### 3. transit_crypto_handler
+- **Input Type:**
+  ```typescript
+  interface TransitEncryptedEnvelope {
+    deps_included_and_valid: true
+    transit_key_id: string
+    transit_ciphertext: bytes
+    resolved_deps: Record<string, ResolvedDep>
+    [key: string]: any
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface EventEncryptedEnvelope {
+    network_id: string
+    key_ref: KeyRef  // Discriminated union: peer vs key
+    event_ciphertext: bytes
+    event_id: string  // blake2b-16 hash of canonical signed plaintext
+    write_to_store: true
+    [key: string]: any
+  }
+  ```
+- **Filter:** `deps_included_and_valid: true` AND has `transit_key_id` AND `transit_ciphertext` AND NOT `key_ref`
+- **Transform:** Uses transit key from resolved_deps to decrypt
+- **Emits:** Second envelope with `write_to_store: true`
 
-- Creators consume `params` and emit unsigned, plaintext events in envelopes that have `self_created:true` and a `deps` array listing required dependencies (e.g. `["identity:abc123"]` for signing)
-- `resolve_deps` (same as above) processes all envelopes where `deps_included_and_valid` is falsy or `unblocked: True` and emits envelopes with `missing_deps: True` and a list of missing deps, or with `deps_included_and_valid: True`, with all of the deps included in the envelope under `resolved_deps`, pulling deps only from already-validated events and ignoring not-yet-validated events. Keys are referred to by hash of event and resolved with any other deps.
-- `sign` consumes envelopes with `self_created:true` and `deps_included_and_valid: True`, extracts the identity's private key from `resolved_deps`, adds a signature to the event, and emits envelopes with `selfSigned: True` 
-- All other checks same as create from here to `validated`
-- `encrypt_event` consumes envelopes with `outgoing_checked` or `validated` and no `event_ciphertext` and emits an envelope that adds `event_ciphertext` and `event_key_id` and `write_to_store: True` 
+### 4. remove (Early Check - Optional)
+- **Input Type:**
+  ```typescript
+  interface EventWithId {
+    event_id: string
+    should_remove?: boolean
+    [key: string]: any
+  }
+  ```
+- **Output Type:** Same envelope with `should_remove: false` OR drops envelope
+- **Filter:** Has `event_id` AND `should_remove` is not false
+- **Note:** Early removal based only on event_id (e.g., explicit deletion records)
 
+### 5. event_crypto_handler
+- **Input Type:**
+  ```typescript
+  interface EncryptedEvent {
+    deps_included_and_valid: true
+    should_remove: false
+    key_ref: KeyRef  // Discriminated union: peer vs key
+    event_ciphertext?: bytes
+    resolved_deps: Record<string, ResolvedDep>
+    [key: string]: any
+  }
+  ```
+- **Output Type (Key Event):**
+  ```typescript
+  interface UnsealedKeyEvent {
+    event_type: "key"
+    key_id: string
+    unsealed_secret: bytes
+    group_id: string
+    prekey_id: string     // Which prekey was used
+    tag_id: string        // KEM tag for decapsulation
+    write_to_store: true
+    sig_checked: true     // Bypass signature verification
+    validated: true       // Self-validating after unsealing
+    [key: string]: any
+  }
+  ```
+- **Output Type (Regular Event):**
+  ```typescript
+  interface DecryptedEvent {
+    event_plaintext: object
+    event_type: string
+    write_to_store: true
+    [key: string]: any
+  }
+  ```
+- **Filter:** 
+  - Decrypt: `deps_included_and_valid: true` AND `should_remove: false` AND `key_ref` exists AND no `event_plaintext`
+  - Encrypt: `validated: true` AND has `event_plaintext` AND no `event_ciphertext`
+- **Transform:**
+  - If `key_ref.kind == "peer"`: Unseal using KEM with identity/prekey
+  - If `key_ref.kind == "key"`: Decrypt using symmetric key from resolved key event
+- **Note:** Combined handler for encryption, decryption, and key unsealing
 
-## Outgoing Pipeline
+### 6. event_store
+- **Input Type:**
+  ```typescript
+  interface StorableEvent {
+    write_to_store: true
+    event_id?: string
+    event_ciphertext?: bytes
+    event_plaintext?: object
+    key_id?: string
+    received_at?: number  // Preserved from network receipt
+    origin_ip?: string
+    origin_port?: number
+    [key: string]: any
+  }
+  ```
+- **Output Type:** Same with `stored: true`
+- **Filter:** `write_to_store: true`
+- **Action:** Stores event data in database, including network metadata for observability
+- **Purge Function:**
+  - Called by validate handler when event fails validation
+  - Marks event as `purged: true` in store but keeps event_id for duplicate rejection
+  - Sets TTL for eventual cleanup of purged events
+  - Prevents invalid events from being processed while maintaining blocking for duplicates
 
-- Handlers that send events (sync-request, e.g.) emit envelopes with `outgoing:True`, and all of these as unresolved dependencies: `event-id`, `due_ms`, `network-id`, `address_id`, `user-id`, `peer-id`, `key_id` and `transit_key_id` (so they can control timing of send) with `deps_included_and_valid` as false. 
-- `resolve_deps` consumes `deps_included_and_valid: False` and emits with all dependencies including with all this dep data including `dest_address`, `dest_port`, `event_plaintext`, `event_ciphertext` (if available e.g. if not a newly created event being gossipped) and emits with `deps_included_and_valid: True`
-- `check_outgoing` consumes envelopes with (`outgoing:True` AND `deps_included_and_valid: True`) and without `outgoing_checked` and ensures that `address_id`, `peer_id`, and `user_id` all match and emits envelope with `outgoing_checked: True`
-- `encrypt_event` consumes envelopes with `outgoing_checked` or `validated` and no `event_ciphertext` (if there are any) and emits an envelope with no event `plaintext` or `secret` and event `event_ciphertext` and `event_key_id` 
-- `encrypt_transit` consumes envelopes with `outgoing_checked` and `ciphertext` and `transit_key_id` and `transit_secret` and emits an envelope with no `event_plaintext` or `event_ciphertext` or secret or `event_key_id` or `transit_secret` and only `transit_ciphertext` and `transit_key_id`
-- `strip_for_send` consumes events with `transit_ciphertext` and ensures they consist only of `transit_ciphertext`, `transit_key_id`, `due_ms`, `dest_ip`, `dest_port` and `stripped_for_send: True` and are not of an event type that should never be shared e.g. `identity_secret` or `transit_secret`
-- `send_to_network` consumes events with `stripped_for_send: True` and sends them using a framework-provided function send(stripped_envelope)
+### 7. remove (Content-Based - Optional)
+- **Input Type:**
+  ```typescript
+  interface DecryptedEventWithType {
+    event_id: string
+    event_plaintext: object
+    event_type: string
+    should_remove?: boolean
+    [key: string]: any
+  }
+  ```
+- **Output Type:** Same envelope with `should_remove: false` OR drops envelope
+- **Filter:** Has `event_plaintext` AND `event_type` AND `should_remove` is not false
+- **Action:** Calls event-type-specific Removers with full event data
+- **Note:** Can now make informed decisions (e.g., remove messages when channel is deleted)
+
+### 8. resolve_deps (Second Pass for Signature)
+- **Input/Output Types:** Same as first pass
+- **Filter:** `event_plaintext` exists AND `sig_checked` is not true AND (`deps_included_and_valid` is false OR needs peer resolution)
+- **Note:** Resolves peer_id from plaintext to get public key for signature verification
+
+### 9. signature_handler
+- **Input Type:**
+  ```typescript
+  interface SignableOrVerifiableEvent {
+    event_plaintext: object & { signature?: bytes, peer_id?: string }
+    sig_checked?: boolean
+    self_created?: boolean
+    deps_included_and_valid: true
+    resolved_deps: Record<string, ResolvedDep>
+    event_type?: string  // Skip if "key"
+    [key: string]: any
+  }
+  ```
+- **Output Type:** Same with `sig_checked: true` and `event_id: string` or `error: string`
+- **Filter:** 
+  - Skip: `event_type: "key"` (key events are sealed, not signed)
+  - Sign: `self_created: true` AND `deps_included_and_valid: true` AND no signature
+  - Verify: `event_plaintext` exists AND `sig_checked` is not true AND `deps_included_and_valid: true`
+- **Transform:**
+  - Signs/verifies signature
+  - Generates `event_id` as blake2b-16 hash of canonical signed plaintext (512 bytes)
+- **Note:** Combined handler for both signing and verification
+
+### 10. membership_check (If Applicable)
+- **Input Type:**
+  ```typescript
+  interface GroupEvent {
+    event_plaintext: object & { group_id?: string, group_member_id?: string, user_id?: string }
+    is_group_member?: boolean
+    [key: string]: any
+  }
+  ```
+- **Output Type:** Same with `is_group_member: true`
+- **Filter:** event_plaintext has `group_id` AND `is_group_member` is false/absent
+- **Validates:** group_member_id matches user_id and group_id
+
+### 11. validate
+- **Input Type:**
+  ```typescript
+  interface ValidatableEvent {
+    event_plaintext: object
+    event_type: string
+    sig_checked: true
+    is_group_member?: true
+    resolved_deps?: Record<string, ValidatedEvent>
+    event_id: string  // Required for purging
+    [key: string]: any
+  }
+  ```
+- **Output Type:** Same with `validated: true` or `error: string`
+- **Filter:** Has `event_plaintext`, `event_type`, `sig_checked: true`, AND (no `group_id` in plaintext OR `is_group_member: true`)
+- **Action:** 
+  - Calls event type specific validator with full envelope
+  - If validation fails: calls event_store.purge(event_id) to mark as invalid
+  - Purged events remain in store for duplicate detection but won't be processed
+
+### 12. resolve_deps (Combined with Unblock Logic)
+- **Note:** This handler now combines dependency resolution AND unblocking logic
+- **Input Type:**
+  ```typescript
+  interface NeedsDepsOrValidatedEvent {
+    // For resolution
+    deps?: string[]
+    deps_included_and_valid?: boolean
+    unblocked?: boolean
+    
+    // For unblocking
+    validated?: true
+    missing_deps?: true
+    event_id?: string
+    missing_deps_list?: string[]
+    retry_count?: number
+    [key: string]: any
+  }
+  ```
+- **Output:** 
+  - Resolution: Same envelope with `resolved_deps` OR drops if missing deps
+  - Unblocking: Emits previously blocked events with `unblocked: true`
+- **Filter:** 
+  - Resolution: Has `deps` AND (`deps_included_and_valid` is false OR `unblocked` is true)
+  - Unblocking: `validated: true` OR `missing_deps: true`
+- **Action:** 
+  - Resolves dependencies from validated events and local secrets
+  - Blocks events with missing dependencies
+  - Unblocks events when ALL dependencies are satisfied
+  - Tracks retry count (max 100) to prevent infinite loops
+  - Manages blocked_events and blocked_event_deps tables
+
+### 13. project (Per Event Type)
+- **Input Type:**
+  ```typescript
+  interface ProjectableEvent {
+    validated: true
+    event_type: string
+    event_plaintext: object
+    [key: string]: any
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface ProjectedEvent extends ProjectableEvent {
+    projected: true
+    deltas: Delta[]
+  }
+  ```
+- **Filter:** `validated: true` AND matching event_type
+- **Action:** Calls event type specific projector
+
+## Creation Pipeline: Command → Storage
+
+### Phase 1: Creation and Validation
+
+### 1. Command (e.g., create_message)
+- **Input Type:**
+  ```typescript
+  interface MessageParams {
+    content: string
+    channel_id: string
+    identity_id: string  // Which identity to use for signing
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface CommandEnvelope {
+    event_plaintext: {
+      type: "message"
+      content: string
+      channel_id: string
+      peer_id: string  // Included in event data
+    }
+    event_type: "message"
+    self_created: true
+    deps: string[]  // ["identity:identity_abc123"]
+  }
+  ```
+- **Note:** peer_id is included in event_plaintext as it's part of the event data
+
+### 2. resolve_deps
+- **Input/Output Types:** Same as incoming pipeline
+- **Note:** Resolves identity with private key in local_metadata. Keeps resolved_deps in envelope for reuse by subsequent handlers.
+
+### 3. signature_handler
+- **Input Type:**
+  ```typescript
+  interface SignableEnvelope {
+    event_plaintext: object & { peer_id: string }
+    self_created: true
+    deps_included_and_valid: true
+    resolved_deps: Record<string, ResolvedDep>
+    [key: string]: any
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface SignedEnvelope extends SignableEnvelope {
+    event_plaintext: object & { signature: bytes }
+    event_id: string  // Generated from canonical signed plaintext
+  }
+  ```
+- **Filter:** `self_created: true` AND `deps_included_and_valid: true` AND no signature
+- **Transform:** 
+  - Uses private key from resolved_deps["identity:..."] to sign
+  - Generates `event_id` as blake2b-16 hash of canonical signed plaintext (512 bytes)
+- **Note:** Same handler used for both signing and verification
+
+### 4-10. Validation Flow
+- Same handlers as incoming: signature_handler → membership_check → validate
+
+### Phase 2: Storage (After Validation)
+
+### 11. event_crypto_handler
+- **Input Type:**
+  ```typescript
+  interface ValidatedPlaintext {
+    validated: true
+    event_plaintext: object
+    event_ciphertext?: undefined
+    [key: string]: any
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface EncryptedEvent {
+    event_ciphertext: bytes
+    key_ref: KeyRef  // Which key was used for encryption
+    event_id: string  // blake2b-16 hash of canonical signed plaintext
+    write_to_store: true
+    [key: string]: any
+  }
+  ```
+- **Filter:** `validated: true` AND has `event_plaintext` AND no `event_ciphertext`
+- **Transform:** Encrypts plaintext (event_id already set by signature_handler)
+- **Note:** Same handler used for encryption, decryption, and key unsealing
+
+### 12. event_store
+- Same as incoming pipeline
+
+### 13. project
+- Same as incoming pipeline
+
+## Outgoing Pipeline: Storage → Network
+
+### 1. Outgoing Command (e.g., send_sync_request)
+- **Input Type:**
+  ```typescript
+  interface SendParams {
+    event_id: string      // Event to send
+    peer_id: string       // Destination peer
+    due_ms?: number       // When to send (optional)
+  }
+  ```
+- **Output Type:**
+  ```typescript
+  interface OutgoingEnvelope {
+    outgoing: true
+    deps: string[]  // Dependencies to resolve
+    deps_included_and_valid: false
+  }
+  ```
+- **Transform:** Creates envelope with deps for event, address, keys, etc.
+
+### 2. resolve_deps
+- **Input/Output Types:** Same as incoming pipeline
+- **Transform:** Resolves all outgoing dependencies:
+  - `address:address_id` → dest_ip, dest_port
+  - `event:event_id` → event_plaintext, event_ciphertext
+  - `transit_key:transit_key_id` → transit_secret
+  - `peer:peer_id`, `user:user_id` → peer/user data
+
+### 3. check_outgoing
+- **Input Type:**
+  ```typescript
+  interface OutgoingWithDeps {
+    outgoing: true
+    deps_included_and_valid: true
+    resolved_deps: Record<string, ResolvedDep>
+    event_type?: string
+    outgoing_checked?: undefined
+    [key: string]: any
+  }
+  ```
+- **Output Type:** Same with `outgoing_checked: true`
+- **Filter:** `outgoing: true` AND `deps_included_and_valid: true` AND no `outgoing_checked`
+- **Validates:** 
+  - address, peer, and user all match and are consistent
+  - event_type is not a secret type (identity_secret, transit_secret, etc.)
+
+### 4. event_crypto_handler (If Needed)
+- **Input/Output Types:** Same as creation pipeline
+- **Filter:** `outgoing_checked: true` AND no `event_ciphertext`
+- **For:** Newly created events being gossiped
+
+### 5. transit_crypto_handler
+- **Input Type:**
+  ```typescript
+  interface OutgoingEncrypted {
+    outgoing_checked: true
+    event_ciphertext: bytes
+    transit_key_id: string
+    resolved_deps: Record<string, ResolvedDep>  // Contains transit_secret
+    [key: string]: any
+  }
+  ```
+- **Output Type:** `OutgoingTransitEnvelope` (exact type required by send_to_network)
+- **Filter:** `outgoing_checked: true` AND has `event_ciphertext` AND `transit_key_id`
+- **Transform:** Encrypts with transit key, removes all plaintext/secrets
+
+### 6. send_to_network
+- **Input Type:**
+  ```typescript
+  interface OutgoingTransitEnvelope {
+    transit_ciphertext: bytes
+    transit_key_id: string
+    dest_ip: string
+    dest_port: number
+    due_ms?: number
+    // That's it! No other fields allowed
+  }
+  ```
+- **Filter:** Has all required transit fields (enforced by type system)
+- **Action:** Sends to network using framework's send() function
+- **Note:** Type system ensures no secrets or metadata can leak. strip_for_send is no longer needed!
+
+## Key Design Principles
+
+1. **deps_included_and_valid** resets to false when any handler adds new dependencies or resolve_deps scans for missing in its filter!
+2. **write_to_store: true** triggers storage at multiple points in the pipeline
+3. **Handlers are pure functions** that only transform envelopes
+4. **Event IDs** are blake2b hashes of ciphertext, not plaintext
+5. **Transit encryption** wraps event encryption for forward secrecy
+6. **Local metadata** (like private keys) stays local and is never sent
 
 ## Network Simulator
 
-- `network_simulator` when present also consumes envelopes with `stripped_for_send: True` and envelopes with realistic data for `receive_from_network` incrementing time to simulate latency. (This requires a network design that can differentiate incoming data and route to proper networks/identities)
+- **Filter:** `stripped_for_send: true`
+- **Action:** Simulates network latency and routes back to receive_from_network
+- **Note:** Requires network design that can differentiate incoming data and route to proper networks/identities
 
 # Event Types
 
@@ -259,8 +762,8 @@ params = {
     "identity_id": "identity_abc"  # Which identity is sending
 }
 
-# Command creates envelope with dependencies
-envelope = create_message(params, db)
+# Command creates envelope with dependencies (pure function, no DB access!)
+envelope = create_message(params)
 # Returns: {
 #     "event_plaintext": {"type": "message", "content": "Hello world", ...},
 #     "event_type": "message",
@@ -415,3 +918,24 @@ Testing infra
 Use ideal_protocol_design.md as a guide when necessary, but simplify when possible.  
 
 Use previous_poc as a cheat sheet when implementing handler functionality related to encryption, identity, joining with `user` events, linking, etc. We can use this as a model for the kinds of handlers, though what we are building is a bit more complex because its networking model (with real addresses and transit enc) is more complex.
+
+# Future Work
+
+## Raw Store Pattern (Quarantine Area)
+
+Consider implementing a two-phase storage pattern:
+
+1. **RAW store** (after transit decrypt): `events_raw` keyed by event_id
+   - Always dedupe on event_id
+   - Never write plaintext here
+   - Limited retention (TTL, size quotas)
+   - Drop rows that never validate after N retries / T hours
+
+2. **VALIDATED store** (after check_sig + validate): `events_validated`
+   - Includes rid, event_type, plaintext, etc.
+   - Promote from RAW→VALIDATED when validation passes
+   - resolve_deps queries events_validated
+
+**Operational guardrails:**
+- Never persist resolved_local (private keys, group keys, prekeys) in any table
+- Keys only live in memory

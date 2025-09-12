@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
-from .database import get_connection, init_database
+from .db import get_connection, init_database
 from .handler import registry
 from .types import Envelope
 

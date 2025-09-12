@@ -1,436 +1,228 @@
-#!/usr/bin/env python3
 """
-HTTP-like API executor for the Quiet protocol.
-
-Maps OpenAPI operationIds to protocol commands and executes them.
-Designed for local tooling and tests.
+Protocol API client - protocol-agnostic client that uses OpenAPI spec.
 """
 
-import sys
 import os
-import json
 import yaml
-import argparse
-import re
-import time
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple, List
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import urllib.parse
+from typing import Dict, Any, Optional, List
+import sqlite3
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from core.processor import PipelineRunner, command_registry
-from core.database import get_connection
+from .processor import PipelineRunner
+from .db import get_connection, init_database
 
 
-def load_yaml(filepath):
-    """Load YAML file."""
-    with open(filepath, 'r') as f:
-        return yaml.safe_load(f)
-
-
-def match_path_to_operation(api_spec: Dict, method: str, request_path: str) -> Tuple[str, Dict, Dict]:
-    """Return (spec_path, operation, path_params) for a method and path."""
-    method = method.lower()
+class API:
+    """Protocol API client using OpenAPI spec for operation discovery."""
     
-    for spec_path, path_item in api_spec.get("paths", {}).items():
-        if method not in path_item:
-            continue
-            
-        # Convert OpenAPI path to regex by replacing {param} with named groups
-        pattern = spec_path
-        param_names = re.findall(r'\{([^}]+)\}', spec_path)
-        for param_name in param_names:
-            pattern = pattern.replace(f"{{{param_name}}}", f"(?P<{param_name}>[^/]+)")
+    def __init__(self, protocol_dir: Path, reset_db: bool = True):
+        """
+        Initialize API client.
         
-        # Add start and end anchors
-        pattern = f"^{pattern}$"
+        Args:
+            protocol_dir: Protocol directory path containing openapi.yaml
+            reset_db: Whether to reset database on init
+        """
+        self.protocol_dir = Path(protocol_dir)
         
-        # Try to match
-        match = re.match(pattern, request_path)
-        if match:
-            path_params = match.groupdict()
-            return spec_path, path_item[method], path_params
-    
-    return None, None, None
-
-
-class APIExecutor:
-    """Execute API operations by mapping to commands and queries."""
-    
-    def __init__(self, protocol_dir: str, db_path: str = "api.db", verbose: bool = False):
-        self.protocol_dir = protocol_dir
-        self.db_path = db_path
-        self.verbose = verbose
+        # Database path
+        self.db_path = self.protocol_dir / "demo.db"
         
-        # Load OpenAPI spec
-        api_path = Path(protocol_dir) / "openapi.yaml"
-        if not api_path.exists():
-            raise FileNotFoundError(f"No openapi.yaml found in {protocol_dir}")
-        self.api_spec = load_yaml(api_path)
+        # Reset database if requested
+        if reset_db and self.db_path.exists():
+            os.remove(self.db_path)
         
         # Initialize pipeline runner
-        self.runner = PipelineRunner(db_path=db_path, verbose=verbose)
-        
-        # Initialize database with protocol schema
-        db = get_connection(db_path)
-        from core.database import init_database
-        init_database(db, protocol_dir)
-        
-        # Load protocol handlers and commands once
-        self.runner._load_protocol_handlers(protocol_dir)
-        db.close()
-        
-        # Register protocol commands
-        self._register_protocol_commands()
-        
-        # Keep track of processor logs
-        self.processor_logs = []
-    
-    def _register_protocol_commands(self):
-        """Register protocol-specific commands based on OpenAPI spec."""
-        protocol_name = Path(self.protocol_dir).name
-        
-        # Extract all operationIds from the OpenAPI spec
-        operation_ids = set()
-        for path, path_item in self.api_spec.get("paths", {}).items():
-            for method, operation in path_item.items():
-                if isinstance(operation, dict) and "operationId" in operation:
-                    operation_ids.add(operation["operationId"])
-        
-        # For each operationId, try to find and register the corresponding command
-        for operation_id in operation_ids:
-            # Skip query operations (they're handled separately)
-            if operation_id.startswith(("list_", "get_", "dump_")):
-                continue
-                
-            # Try to find the command in event type modules
-            command_registered = False
-            
-            # Common mapping of operation patterns to event types
-            event_type_mapping = {
-                "create_identity": "identity",
-                "create_key": "key",
-                "create_transit_secret": "transit_secret",
-                "create_group": "group",
-                "create_channel": "channel",
-                "create_message": "message",
-                "create_invite": "invite",
-                "create_add": "add",
-                "create_network": "network",
-                "join_network": "user"
-            }
-            
-            if operation_id in event_type_mapping:
-                event_type = event_type_mapping[operation_id]
-                try:
-                    # Import the commands module for this event type
-                    module = __import__(
-                        f"protocols.{protocol_name}.events.{event_type}.commands",
-                        fromlist=[operation_id]
-                    )
-                    
-                    # Look for the command function
-                    if hasattr(module, operation_id):
-                        command_func = getattr(module, operation_id)
-                        command_registry.register(operation_id, command_func)
-                        command_registered = True
-                        if self.verbose:
-                            print(f"Registered command: {operation_id} from {event_type}")
-                except ImportError as e:
-                    if self.verbose:
-                        print(f"Could not import {event_type} commands: {e}")
-            
-            if not command_registered and self.verbose:
-                print(f"Warning: No command found for operationId: {operation_id}")
-        
-    def execute(self, method: str, path: str, body: Dict[str, Any] = None, 
-                query_params: Dict[str, str] = None) -> Tuple[int, Dict[str, Any]]:
-        """Execute an API operation and return (status_code, response_body)."""
-        
-        # Match path to operation
-        spec_path, operation, path_params = match_path_to_operation(self.api_spec, method, path)
-        if not operation:
-            return 404, {"error": f"No operation found for {method} {path}"}
-        
-        operation_id = operation.get("operationId")
-        if not operation_id:
-            return 500, {"error": "No operationId defined"}
-        
-        # Build params combining path params, query params, and body
-        params = {}
-        if path_params:
-            params.update(path_params)
-        if query_params:
-            params.update(query_params)
-        if body:
-            params.update(body)
-        
-        try:
-            # Check if this is a command or a query
-            if operation_id in command_registry._commands:
-                # Execute as command
-                result = self._execute_command(operation_id, params)
-            else:
-                # Execute as query
-                result = self._execute_query(operation_id, params)
-            
-            return 200, result
-            
-        except ValueError as e:
-            return 400, {"error": str(e)}
-        except Exception as e:
-            return 500, {"error": str(e)}
-    
-    def _execute_command(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a command through the pipeline."""
-        # Clear logs
-        self.processor_logs = []
-        
-        # Capture logs during execution
-        original_log = self.runner.log
-        original_log_envelope = self.runner.log_envelope
-        
-        def capture_log(message: str):
-            if message and "]" in message:
-                timestamp = message.split("]")[0][1:]
-            else:
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            self.processor_logs.append({
-                "timestamp": timestamp,
-                "message": message or ""
-            })
-            original_log(message)
-        
-        def capture_envelope_log(action: str, handler: str, envelope: Dict[str, Any]):
-            self.processor_logs.append({
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "action": action,
-                "handler": handler,
-                "envelope": envelope
-            })
-            # Don't call original_log_envelope to avoid duplicate output
-        
-        self.runner.log = capture_log
-        self.runner.log_envelope = capture_envelope_log
-        
-        # Run the command
-        commands = [{"name": command_name, "params": params}]
-        db = get_connection(self.db_path)
-        
-        # Reset runner state
-        self.runner.processed_count = 0
-        self.runner.emitted_count = 0
-        
-        # Execute commands
-        command_envelopes = []
-        for cmd in commands:
-            envelopes = command_registry.execute(cmd["name"], cmd["params"], db)
-            command_envelopes.extend(envelopes)
-        
-        # Process through pipeline
-        if command_envelopes:
-            self.runner._process_envelopes(command_envelopes, db)
-        
-        # Process outgoing queue
-        # self.runner._process_outgoing_queue(db)  # Disabled - not part of current design
-        
-        db.commit()
-        db.close()
-        
-        # Restore original logging
-        self.runner.log = original_log
-        self.runner.log_envelope = original_log_envelope
-        
-        # Return command result
-        return {
-            "success": True,
-            "processed_count": self.runner.processed_count,
-            "emitted_count": self.runner.emitted_count
-        }
-    
-    def _execute_query(self, query_name: str, params: Dict[str, Any]) -> Any:
-        """Execute a query."""
-        # Import query functions from protocol
-        protocol_name = Path(self.protocol_dir).name
-        
-        # Special system queries
-        if query_name == "dump_database":
-            return self._dump_database()
-        elif query_name == "get_processor_logs":
-            limit = params.get("limit", 100)
-            # Convert limit to int if it's a string
-            if isinstance(limit, str):
-                limit = int(limit)
-            return self.processor_logs[-limit:]
-        
-        # Try to find the query in event types
-        protocol_name = Path(self.protocol_dir).name
-        
-        # Map operation IDs to event types and query modules
-        query_mapping = {
-            'list_identities': ('identity', 'list'),
-            'list_keys': ('key', 'list'),
-            'list_transit_keys': ('transit_secret', 'list'),
-        }
-        
-        if query_name in query_mapping:
-            event_type, query_module = query_mapping[query_name]
-            try:
-                module = __import__(
-                    f"protocols.{protocol_name}.events.{event_type}.queries.{query_module}", 
-                    fromlist=[query_name]
-                )
-                query_func = getattr(module, query_name)
-                
-                db = get_connection(self.db_path)
-                result = query_func(params, db)
-                db.close()
-                
-                return result
-            except (ImportError, AttributeError) as e:
-                raise ValueError(f"Query '{query_name}' not found: {e}")
-        else:
-            raise ValueError(f"Unknown query: {query_name}")
-    
-    def _dump_database(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Dump all tables from the database."""
-        db = get_connection(self.db_path)
-        cursor = db.cursor()
-        
-        # Get all tables
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        tables = cursor.fetchall()
-        
-        result = {}
-        for table in tables:
-            table_name = table['name']
-            if table_name.startswith('sqlite_'):
-                continue
-            
-            # Get all rows
-            cursor.execute(f"SELECT * FROM {table_name}")
-            rows = cursor.fetchall()
-            
-            # Convert to list of dicts
-            result[table_name] = []
-            for row in rows:
-                row_dict = {}
-                for key in row.keys():
-                    value = row[key]
-                    # Convert bytes to hex for JSON serialization
-                    if isinstance(value, bytes):
-                        value = value.hex()
-                    row_dict[key] = value
-                result[table_name].append(row_dict)
-        
-        db.close()
-        return result
-
-
-class APIRequestHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for the API server."""
-    
-    def __init__(self, *args, api_executor: APIExecutor = None, **kwargs):
-        self.api_executor = api_executor
-        super().__init__(*args, **kwargs)
-    
-    def do_GET(self):
-        """Handle GET requests."""
-        self._handle_request('GET')
-    
-    def do_POST(self):
-        """Handle POST requests."""
-        self._handle_request('POST')
-    
-    def do_PUT(self):
-        """Handle PUT requests."""
-        self._handle_request('PUT')
-    
-    def do_DELETE(self):
-        """Handle DELETE requests."""
-        self._handle_request('DELETE')
-    
-    def _handle_request(self, method: str):
-        """Handle any HTTP request."""
-        # Parse URL
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-        query_params = urllib.parse.parse_qs(parsed.query)
-        
-        # Flatten query params (take first value for each key)
-        query_params = {k: v[0] for k, v in query_params.items()}
-        
-        # Read body for POST/PUT
-        body = None
-        if method in ['POST', 'PUT']:
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
-                body_bytes = self.rfile.read(content_length)
-                try:
-                    body = json.loads(body_bytes)
-                except json.JSONDecodeError:
-                    self.send_error(400, "Invalid JSON")
-                    return
-        
-        # Execute operation
-        status_code, response_body = self.api_executor.execute(
-            method, path, body, query_params
+        self.runner = PipelineRunner(
+            db_path=str(self.db_path),
+            verbose=False
         )
         
-        # Send response
-        self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(response_body, indent=2).encode())
+        # Load OpenAPI spec
+        openapi_path = self.protocol_dir / "openapi.yaml"
+        if not openapi_path.exists():
+            raise ValueError(f"No OpenAPI spec found at {openapi_path}")
+        
+        with open(openapi_path, 'r') as f:
+            self.openapi = yaml.safe_load(f)
+        
+        # Parse operations from OpenAPI spec
+        self._parse_operations()
+        
+        # Register commands and queries
+        self._register_operations()
     
-    def log_message(self, format, *args):
-        """Override to reduce logging."""
-        if self.api_executor.verbose:
-            super().log_message(format, *args)
+    def _parse_operations(self):
+        """Parse operations from OpenAPI spec."""
+        self.operations = {}
+        
+        # Parse paths from OpenAPI
+        for path, methods in self.openapi.get('paths', {}).items():
+            for method, spec in methods.items():
+                if 'operationId' in spec:
+                    operation_id = spec['operationId']
+                    self.operations[operation_id] = {
+                        'path': path,
+                        'method': method,
+                        'spec': spec
+                    }
+    
+    def _register_operations(self):
+        """Register commands and queries discovered from OpenAPI spec."""
+        import sys
+        protocol_root = self.protocol_dir.parent.parent
+        if str(protocol_root) not in sys.path:
+            sys.path.insert(0, str(protocol_root))
+        
+        # Import registries
+        from core.processor import command_registry
+        from core.query import query_registry
+        
+        # Find all event directories
+        events_dir = self.protocol_dir / "events"
+        if not events_dir.exists():
+            return
+        
+        # For each operation, try to find and import the corresponding function
+        for operation_id, info in self.operations.items():
+            # Determine event type from path (e.g., /identities -> identity)
+            path_parts = info['path'].strip('/').split('/')
+            if path_parts:
+                event_type = path_parts[0].rstrip('s')  # Remove plural 's'
+                
+                # Check if event type directory exists
+                event_dir = events_dir / event_type
+                if not event_dir.exists():
+                    continue
+                
+                try:
+                    if info['method'] == 'post':
+                        # Import commands module
+                        module_path = f'protocols.{self.protocol_dir.name}.events.{event_type}.commands'
+                        module = __import__(module_path, fromlist=[operation_id])
+                        
+                        # Register command if it exists
+                        if hasattr(module, operation_id):
+                            command_func = getattr(module, operation_id)
+                            command_registry.register(operation_id, command_func)
+                    
+                    elif info['method'] == 'get':
+                        # Import queries module and register with operation ID
+                        module_path = f'protocols.{self.protocol_dir.name}.events.{event_type}.queries'
+                        module = __import__(module_path, fromlist=['*'])
+                        
+                        # Find query functions in the module
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if callable(attr) and getattr(attr, '_is_query', False):
+                                # Register with operation ID
+                                query_registry.register(operation_id, attr)
+                        
+                except ImportError as e:
+                    # Silently skip - not all operations may be implemented
+                    pass
+    
+    def execute_operation(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """Execute an operation by its OpenAPI operation ID."""
+        if operation_id not in self.operations:
+            raise ValueError(f"Unknown operation: {operation_id}")
+        
+        operation = self.operations[operation_id]
+        
+        if operation['method'] == 'post':
+            # Execute as command
+            return self._execute_command(operation_id, params)
+        elif operation['method'] == 'get':
+            # Execute as query
+            return self._execute_query(operation_id, params)
+        else:
+            raise ValueError(f"Unsupported method: {operation['method']}")
+    
+    def _execute_command(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a command through the pipeline runner."""
+        from core.processor import command_registry
+        
+        # Get database connection
+        db = get_connection(str(self.db_path))
+        init_database(db, str(self.protocol_dir))
+        
+        try:
+            # Execute command through registry
+            envelopes = command_registry.execute(operation_id, params or {}, db)
+            
+            # Run the pipeline to process the envelopes
+            if envelopes:
+                self.runner.run(
+                    protocol_dir=str(self.protocol_dir),
+                    input_envelopes=envelopes
+                )
+            
+            # Extract result data from the first envelope
+            result_data = {}
+            if envelopes:
+                env = envelopes[0]
+                if 'event_plaintext' in env:
+                    result_data = env['event_plaintext']
+                else:
+                    result_data = env
+            
+            return result_data
+            
+        finally:
+            db.close()
+    
+    def _execute_query(self, operation_id: str, params: Dict[str, Any] = None) -> Any:
+        """Execute a query."""
+        from core.query import query_registry
+        
+        # Get database connection
+        db = get_connection(str(self.db_path))
+        
+        try:
+            # Execute query through registry using operation_id directly
+            # The queries should be registered with their operation IDs
+            result = query_registry.execute(operation_id, db, params or {})
+            return result
+            
+        finally:
+            db.close()
+    
+    def __getattr__(self, name: str):
+        """Dynamic method creation for OpenAPI operations."""
+        # Check if this is an operation from OpenAPI spec
+        if name in self.operations:
+            def operation_method(*args, **kwargs):
+                # Handle both positional and keyword arguments
+                if args and not kwargs:
+                    # Check the OpenAPI spec to determine parameter names
+                    spec = self.operations[name]['spec']
+                    if 'requestBody' in spec:
+                        schema = spec['requestBody']['content']['application/json']['schema']
+                        required = schema.get('required', [])
+                        
+                        # If single required parameter and single argument, map it
+                        if len(required) == 1 and len(args) == 1:
+                            param_name = required[0]
+                            return self.execute_operation(name, {param_name: args[0]})
+                    
+                    # Otherwise assume it's a params dict
+                    return self.execute_operation(name, args[0] if isinstance(args[0], dict) else None)
+                else:
+                    return self.execute_operation(name, kwargs if kwargs else None)
+            return operation_method
+        
+        # If not found, raise AttributeError
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
 
-def run_server(protocol_dir: str, port: int = 8080, db_path: str = "api.db", verbose: bool = False):
-    """Run the API server."""
-    api_executor = APIExecutor(protocol_dir, db_path, verbose)
+class APIError(Exception):
+    """API error with status code."""
     
-    # Create request handler with api_executor
-    def handler(*args, **kwargs):
-        APIRequestHandler(*args, api_executor=api_executor, **kwargs)
-    
-    server = HTTPServer(('localhost', port), handler)
-    print(f"API server running on http://localhost:{port}")
-    print(f"Protocol: {protocol_dir}")
-    print(f"Database: {db_path}")
-    print("Press Ctrl+C to stop")
-    
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-        server.shutdown()
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        self.message = message
+        super().__init__(f"API Error {status_code}: {message}")
 
 
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description='Run API server for a protocol')
-    parser.add_argument('protocol', help='Protocol directory (e.g., protocols/quiet)')
-    parser.add_argument('--port', type=int, default=8080, help='Port to listen on')
-    parser.add_argument('--db', default='api.db', help='Database path')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
-    
-    args = parser.parse_args()
-    
-    # Validate protocol directory
-    protocol_path = Path(args.protocol)
-    if not protocol_path.exists():
-        print(f"Error: Protocol directory '{args.protocol}' does not exist")
-        sys.exit(1)
-    
-    run_server(args.protocol, args.port, args.db, args.verbose)
-
-
-if __name__ == '__main__':
-    main()
+# For backward compatibility
+APIClient = API

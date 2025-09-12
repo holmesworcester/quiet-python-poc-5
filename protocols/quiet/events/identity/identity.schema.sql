@@ -15,11 +15,3 @@ CREATE TABLE IF NOT EXISTS peers (
     public_key BLOB NOT NULL,
     added_at INTEGER NOT NULL
 );
-
--- Users table created by identity projector
-CREATE TABLE IF NOT EXISTS users (
-    user_id TEXT PRIMARY KEY,
-    network_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    peer_id TEXT NOT NULL
-);

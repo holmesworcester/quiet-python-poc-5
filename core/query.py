@@ -3,7 +3,7 @@ Base class and decorators for query functions with read-only database access.
 """
 from typing import Any, Callable, TypeVar, Protocol
 import sqlite3
-from .readonly_db import ReadOnlyConnection, get_readonly_connection
+from .db import ReadOnlyConnection, get_readonly_connection
 
 T = TypeVar('T')
 
@@ -12,6 +12,39 @@ class QueryFunc(Protocol):
     """Protocol for query functions that read from the database."""
     def __call__(self, db: ReadOnlyConnection, **kwargs: Any) -> Any:
         ...
+
+
+class QueryRegistry:
+    """Registry for query functions in a module."""
+    
+    def __init__(self):
+        self._queries: dict[str, Callable] = {}
+    
+    def register(self, name: str, query_func: Callable):
+        """Register a query function."""
+        if not getattr(query_func, '_is_query', False):
+            raise ValueError(f"{name} must be decorated with @query")
+        self._queries[name] = query_func
+    
+    def get(self, name: str) -> Callable:
+        """Get a query function by name."""
+        return self._queries.get(name)
+    
+    def list_queries(self) -> list[str]:
+        """List all registered query names."""
+        return sorted(self._queries.keys())
+    
+    def execute(self, name: str, db: ReadOnlyConnection, params: dict[str, Any] = None) -> Any:
+        """Execute a registered query."""
+        if name not in self._queries:
+            raise ValueError(f"Query '{name}' not found in registry")
+        
+        query_func = self._queries[name]
+        return query_func(db, **(params or {}))
+
+
+# Global query registry
+query_registry = QueryRegistry()
 
 
 def query(func: Callable) -> Callable:
@@ -47,25 +80,7 @@ def query(func: Callable) -> Callable:
     
     # Mark as query function
     wrapper._is_query = True
+    
+    # Don't auto-register here - let the API do it with proper operation IDs
+    
     return wrapper
-
-
-class QueryRegistry:
-    """Registry for query functions in a module."""
-    
-    def __init__(self):
-        self._queries: dict[str, Callable] = {}
-    
-    def register(self, name: str, query_func: Callable):
-        """Register a query function."""
-        if not getattr(query_func, '_is_query', False):
-            raise ValueError(f"{name} must be decorated with @query")
-        self._queries[name] = query_func
-    
-    def get(self, name: str) -> Callable:
-        """Get a query function by name."""
-        return self._queries.get(name)
-    
-    def list_queries(self) -> list[str]:
-        """List all registered query names."""
-        return sorted(self._queries.keys())

@@ -26,20 +26,9 @@ def project(envelope: Envelope) -> List[Delta]:
     created_at = event_data['created_at']
     name = event_data.get('name', 'User')  # Use provided name or default
     
-    # Return deltas for creating a user
+    # Return deltas for creating a peer (not user - that's handled by user events)
     deltas: List[Delta] = [
-        {
-            'op': 'insert',
-            'table': 'users',
-            'data': {
-                'user_id': peer_id,
-                'network_id': network_id,
-                'name': name,
-                'peer_id': peer_id
-            },
-            'where': {}
-        },
-        # Also maintain the infrastructure peers table
+        # Maintain the infrastructure peers table
         {
             'op': 'insert',
             'table': 'peers',

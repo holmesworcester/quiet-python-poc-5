@@ -14,7 +14,7 @@ protocol_dir = Path(__file__).parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.database import get_connection, init_database
+from core.db import get_connection, init_database
 from core.processor import PipelineRunner, command_registry
 from core.crypto import generate_keypair, sign
 

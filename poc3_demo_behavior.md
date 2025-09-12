@@ -61,6 +61,8 @@ Each panel includes:
 
 ## CLI Features
 
+Note: we can either choose a "numbered panel" command syntax or one that switches panels. 
+
 ### Command Format
 - Panel commands: `<panel>:<command>` (e.g., `1:/create alice`)
 - Variable capture: `<command> -> <var>` (e.g., `1:/invite -> link`)
