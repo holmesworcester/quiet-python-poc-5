@@ -4,7 +4,7 @@ Handler base class and registry for pipeline processing.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Callable, Optional
 import sqlite3
-from .envelope import Envelope
+from core.types import Envelope
 
 
 class Handler(ABC):
@@ -50,7 +50,7 @@ class HandlerRegistry:
         Pass envelope through all matching handlers.
         Returns all new envelopes emitted by handlers.
         """
-        all_emitted = []
+        all_emitted: List[Envelope] = []
         
         for handler in self._handlers:
             if handler.filter(envelope):

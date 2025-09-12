@@ -1,0 +1,1 @@
+"""Transit secret event type module."""

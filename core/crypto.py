@@ -66,7 +66,9 @@ def decrypt(ciphertext: bytes, key: bytes, nonce: bytes) -> bytes:
 
 def seal(plaintext: bytes, public_key: bytes) -> bytes:
     """Seal a message to a public key (anonymous sender)."""
-    public = PublicKey(public_key)
+    # Convert Ed25519 to X25519 for encryption
+    verify_key = nacl.signing.VerifyKey(public_key)
+    public = verify_key.to_curve25519_public_key()
     return nacl.public.SealedBox(public).encrypt(plaintext)
 
 

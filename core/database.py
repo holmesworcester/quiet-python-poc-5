@@ -6,6 +6,16 @@ from typing import Optional
 import os
 
 
+def _load_schema_file(schema_file: str, conn: sqlite3.Connection):
+    """Load a schema file into the database."""
+    with open(schema_file, 'r') as f:
+        schema_sql = f.read()
+        for statement in schema_sql.split(';'):
+            statement = statement.strip()
+            if statement:
+                conn.execute(statement + ';')
+
+
 def get_connection(db_path: str = "quiet.db") -> sqlite3.Connection:
     """Get a database connection with proper settings."""
     conn = sqlite3.connect(db_path)
@@ -15,102 +25,49 @@ def get_connection(db_path: str = "quiet.db") -> sqlite3.Connection:
     return conn
 
 
-def init_database(conn: sqlite3.Connection):
-    """Initialize database schema."""
+def init_database(conn: sqlite3.Connection, protocol_dir: str = None):
+    """Initialize database schema.
     
-    # Events table - stores all validated events
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS events (
-            event_id TEXT PRIMARY KEY,
-            event_type TEXT NOT NULL,
-            network_id TEXT,
-            created_at INTEGER NOT NULL,
-            peer_id TEXT,
-            event_data TEXT NOT NULL,  -- JSON
-            raw_bytes BLOB NOT NULL,   -- Original 512 bytes
-            validated_at INTEGER NOT NULL
-        )
-    """)
+    The framework doesn't define any tables itself - all schema comes from:
+    1. Handler-specific .schema.sql files in handlers/
+    2. Event type-specific .schema.sql files in events/
+    3. Any top-level .schema.sql files in the protocol directory
+    """
     
-    # Blocked events waiting for dependencies
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS blocked_events (
-            event_id TEXT PRIMARY KEY,
-            envelope_data TEXT NOT NULL,  -- Serialized envelope
-            missing_deps TEXT NOT NULL,   -- JSON array of missing dep IDs
-            retry_count INTEGER DEFAULT 0,
-            blocked_at INTEGER NOT NULL,
-            reason TEXT
-        )
-    """)
-    
-    # Dependency tracking for unblocking
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS blocked_by (
-            blocked_event_id TEXT NOT NULL,
-            blocking_event_id TEXT NOT NULL,
-            PRIMARY KEY (blocked_event_id, blocking_event_id)
-        )
-    """)
-    
-    # Transit keys for decryption
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS transit_keys (
-            key_id TEXT PRIMARY KEY,
-            network_id TEXT NOT NULL,
-            secret BLOB NOT NULL,
-            created_at INTEGER NOT NULL,
-            expires_at INTEGER
-        )
-    """)
-    
-    # Event keys for event-layer decryption
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS event_keys (
-            key_id TEXT PRIMARY KEY,
-            network_id TEXT NOT NULL,
-            group_id TEXT NOT NULL,
-            secret BLOB NOT NULL,
-            created_at INTEGER NOT NULL,
-            expires_at INTEGER
-        )
-    """)
-    
-    # Peer information
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS peers (
-            peer_id TEXT PRIMARY KEY,
-            network_id TEXT NOT NULL,
-            public_key BLOB NOT NULL,
-            added_at INTEGER NOT NULL
-        )
-    """)
-    
-    # Our own identities
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS identities (
-            identity_id TEXT PRIMARY KEY,
-            network_id TEXT NOT NULL,
-            private_key BLOB NOT NULL,
-            public_key BLOB NOT NULL,
-            created_at INTEGER NOT NULL
-        )
-    """)
-    
-    # Outgoing queue
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS outgoing_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            envelope_data TEXT NOT NULL,
-            due_ms INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
-        )
-    """)
-    
-    # Create indexes
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_network ON events(network_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_blocked_by_blocking ON blocked_by(blocking_event_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_outgoing_due ON outgoing_queue(due_ms)")
+    if protocol_dir:
+        import glob
+        import os
+        
+        # Load any top-level schema files in the protocol directory
+        for schema_file in glob.glob(os.path.join(protocol_dir, '*.schema.sql')):
+            _load_schema_file(schema_file, conn)
+        
+        # Load event type schemas
+        events_dir = os.path.join(protocol_dir, 'events')
+        if os.path.exists(events_dir):
+            # Look in subdirectories for event type schemas
+            for event_type_dir in os.listdir(events_dir):
+                event_type_path = os.path.join(events_dir, event_type_dir)
+                if os.path.isdir(event_type_path):
+                    for schema_file in glob.glob(os.path.join(event_type_path, '*.schema.sql')):
+                        _load_schema_file(schema_file, conn)
+            
+            # Also check for schemas directly in events/
+            for schema_file in glob.glob(os.path.join(events_dir, '*.schema.sql')):
+                _load_schema_file(schema_file, conn)
+        
+        # Load handler schemas
+        handlers_dir = os.path.join(protocol_dir, 'handlers')
+        if os.path.exists(handlers_dir):
+            # Look in subdirectories for handler schemas
+            for handler_dir in os.listdir(handlers_dir):
+                handler_path = os.path.join(handlers_dir, handler_dir)
+                if os.path.isdir(handler_path):
+                    for schema_file in glob.glob(os.path.join(handler_path, '*.schema.sql')):
+                        _load_schema_file(schema_file, conn)
+            
+            # Also check for schemas directly in handlers/
+            for schema_file in glob.glob(os.path.join(handlers_dir, '*.schema.sql')):
+                _load_schema_file(schema_file, conn)
     
     conn.commit()

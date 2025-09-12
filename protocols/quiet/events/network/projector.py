@@ -1,0 +1,29 @@
+"""
+Projector for network events.
+"""
+from typing import Dict, Any, List
+
+
+def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Project a network event into the networks table.
+    
+    Returns a list of deltas.
+    """
+    event_data = envelope.get('event_plaintext', {})
+    # Return delta for creating a network
+    deltas = [
+        {
+            'op': 'insert',
+            'table': 'networks',
+            'data': {
+                'network_id': event_data['network_id'],
+                'name': event_data['name'],
+                'description': event_data.get('description', ''),
+                'creator_id': event_data['creator_id'],
+                'created_at': event_data['created_at']
+            }
+        }
+    ]
+    
+    return deltas

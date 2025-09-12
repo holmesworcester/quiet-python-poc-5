@@ -1,0 +1,270 @@
+# ===========================================================================================
+# Quiet Protocol API Specification
+# ===========================================================================================
+# Purpose: Defines the OpenAPI specification for the Quiet P2P messaging protocol.
+#          This API enables identity management, key distribution, and encrypted messaging.
+#
+# Key Concepts:
+# - Identities: User accounts with Ed25519 keypairs
+# - Transit Keys: Keys for transit-layer encryption between peers
+# - Event Keys: Keys for event-layer encryption within groups
+# - Envelopes: Containers for encrypted events
+# ===========================================================================================
+
+$schema: https://spec.openapis.org/oas/3.0/schema/2021-09-28
+openapi: 3.0.0
+
+# ===========================================================================================
+# API METADATA
+# ===========================================================================================
+info:
+  title: Quiet Protocol API
+  description: API for the Quiet P2P messaging protocol with multi-layer encryption
+  version: 1.0.0
+
+# ===========================================================================================
+# API ENDPOINTS
+# ===========================================================================================
+paths:
+  # =========================================================================================
+  # IDENTITY MANAGEMENT
+  # =========================================================================================
+  
+  /identities:
+    post:
+      summary: Create a new identity
+      operationId: create_identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - network_id
+              properties:
+                network_id:
+                  type: string
+                  description: Network this identity belongs to
+      responses:
+        '200':
+          description: Identity created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  identity_id:
+                    type: string
+                    description: Public key of the identity
+                  network_id:
+                    type: string
+                  created_at:
+                    type: integer
+
+    get:
+      summary: List all identities
+      operationId: list_identities
+      responses:
+        '200':
+          description: List of identities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    identity_id:
+                      type: string
+                    network_id:
+                      type: string
+                    created_at:
+                      type: integer
+
+  # =========================================================================================
+  # KEY MANAGEMENT
+  # =========================================================================================
+  
+  /keys:
+    post:
+      summary: Create a new encryption key for a group
+      operationId: create_key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - group_id
+                - network_id
+                - identity_id
+              properties:
+                group_id:
+                  type: string
+                  description: Group this key is for
+                network_id:
+                  type: string
+                identity_id:
+                  type: string
+                  description: Identity creating the key
+      responses:
+        '200':
+          description: Key created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key_id:
+                    type: string
+                  group_id:
+                    type: string
+                  created_at:
+                    type: integer
+
+    get:
+      summary: List all keys
+      operationId: list_keys
+      parameters:
+        - name: group_id
+          in: query
+          schema:
+            type: string
+          description: Filter by group ID
+      responses:
+        '200':
+          description: List of keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key_id:
+                      type: string
+                    group_id:
+                      type: string
+                    peer_id:
+                      type: string
+                    created_at:
+                      type: integer
+
+  # =========================================================================================
+  # TRANSIT KEY MANAGEMENT
+  # =========================================================================================
+  
+  /transit-keys:
+    post:
+      summary: Create a new transit encryption key
+      operationId: create_transit_secret
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - network_id
+                - identity_id
+              properties:
+                network_id:
+                  type: string
+                identity_id:
+                  type: string
+                  description: Identity creating the key
+      responses:
+        '200':
+          description: Transit key created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transit_key_id:
+                    type: string
+                  network_id:
+                    type: string
+                  created_at:
+                    type: integer
+
+    get:
+      summary: List all transit keys
+      operationId: list_transit_keys
+      parameters:
+        - name: network_id
+          in: query
+          schema:
+            type: string
+          description: Filter by network ID
+      responses:
+        '200':
+          description: List of transit keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    transit_key_id:
+                      type: string
+                    peer_id:
+                      type: string
+                    network_id:
+                      type: string
+                    created_at:
+                      type: integer
+
+  # =========================================================================================
+  # SYSTEM ENDPOINTS
+  # =========================================================================================
+  
+  /system/database:
+    get:
+      summary: Get current database state
+      operationId: dump_database
+      description: Returns all tables and their contents for debugging
+      responses:
+        '200':
+          description: Database dump
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    type: object
+
+  /system/logs:
+    get:
+      summary: Get recent processor logs
+      operationId: get_processor_logs
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of log entries to return
+      responses:
+        '200':
+          description: Recent log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    timestamp:
+                      type: string
+                    action:
+                      type: string
+                    handler:
+                      type: string
+                    envelope:
+                      type: object
