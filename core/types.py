@@ -58,8 +58,8 @@ class Envelope(TypedDict, total=False):
     resolved_deps: dict[str, dict[str, Any]]
     missing_deps_list: list[str]
     
-    # Local-only data
-    local_metadata: dict[str, Any]
+    # Secret data (never sent over network)
+    secret: dict[str, Any]
     
     # Transit encryption
     transit_key_id: TransitKeyId
@@ -344,6 +344,9 @@ def command(func: Callable[[dict[str, Any]], Envelope]) -> Callable[[dict[str, A
             raise ValueError(f"{func.__name__} envelope missing required fields: {missing}")
         
         return result
+    
+    # Mark as command function
+    wrapper._is_command = True
     
     return wrapper
 

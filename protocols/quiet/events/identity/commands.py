@@ -51,8 +51,8 @@ def create_identity(params: Dict[str, Any]) -> Envelope:
         'peer_id': peer_id,
         'network_id': cmd_params.network_id,
         'deps': [],  # Identity events have no dependencies
-        # Local-only metadata for framework to store
-        'local_metadata': {
+        # Store the secret (private key) - this won't be shared
+        'secret': {
             'private_key': private_key.hex(),
             'public_key': public_key.hex()
         }

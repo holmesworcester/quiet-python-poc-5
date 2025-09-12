@@ -19,9 +19,17 @@ class TestTransitSecretProjector:
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_project_transit_secret_creates_deltas(self, sample_transit_secret_event, initialized_db):
+    def test_project_transit_secret_creates_deltas(self, sample_transit_secret_event):
         """Test that projecting transit secret creates correct deltas."""
-        deltas = project(sample_transit_secret_event, initialized_db)
+        envelope = {
+            'event_plaintext': sample_transit_secret_event,
+            'event_type': 'transit_secret',
+            'event_id': 'test_event_id',
+            'peer_id': sample_transit_secret_event.get('created_by', sample_transit_secret_event.get('peer_id', 'test_peer_id')),
+            'sig_checked': True,
+            'validated': True
+            }
+        deltas = project(envelope)
         
         # Should return deltas
         assert isinstance(deltas, list)
@@ -38,9 +46,17 @@ class TestTransitSecretProjector:
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_project_transit_secret_delta_structure(self, sample_transit_secret_event, initialized_db):
+    def test_project_transit_secret_delta_structure(self, sample_transit_secret_event):
         """Test that deltas have correct structure."""
-        deltas = project(sample_transit_secret_event, initialized_db)
+        envelope = {
+            'event_plaintext': sample_transit_secret_event,
+            'event_type': 'transit_secret',
+            'event_id': 'test_event_id',
+            'peer_id': sample_transit_secret_event.get('created_by', sample_transit_secret_event.get('peer_id', 'test_peer_id')),
+            'sig_checked': True,
+            'validated': True
+            }
+        deltas = project(envelope)
         
         for delta in deltas:
             # Each delta must have op, table, and data
@@ -56,9 +72,17 @@ class TestTransitSecretProjector:
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_project_transit_secret_no_secret_in_delta(self, sample_transit_secret_event, initialized_db):
+    def test_project_transit_secret_no_secret_in_delta(self, sample_transit_secret_event):
         """Test that delta doesn't include the actual secret."""
-        deltas = project(sample_transit_secret_event, initialized_db)
+        envelope = {
+            'event_plaintext': sample_transit_secret_event,
+            'event_type': 'transit_secret',
+            'event_id': 'test_event_id',
+            'peer_id': sample_transit_secret_event.get('created_by', sample_transit_secret_event.get('peer_id', 'test_peer_id')),
+            'sig_checked': True,
+            'validated': True
+            }
+        deltas = project(envelope)
         
         # The delta should not contain the secret
         delta = deltas[0]
@@ -67,9 +91,17 @@ class TestTransitSecretProjector:
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_project_transit_secret_required_fields(self, sample_transit_secret_event, initialized_db):
+    def test_project_transit_secret_required_fields(self, sample_transit_secret_event):
         """Test that all required fields are in the delta."""
-        deltas = project(sample_transit_secret_event, initialized_db)
+        envelope = {
+            'event_plaintext': sample_transit_secret_event,
+            'event_type': 'transit_secret',
+            'event_id': 'test_event_id',
+            'peer_id': sample_transit_secret_event.get('created_by', sample_transit_secret_event.get('peer_id', 'test_peer_id')),
+            'sig_checked': True,
+            'validated': True
+            }
+        deltas = project(envelope)
         
         delta = deltas[0]
         required_fields = ['transit_key_id', 'peer_id', 'network_id', 'created_at']

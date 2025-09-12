@@ -55,8 +55,8 @@ def project(envelope: Envelope) -> List[Delta]:
             }
         })
     
-    # Store the identity with private key in local storage
-    if 'local_metadata' in envelope:
+    # Store the identity with private key in local storage if we created it
+    if validated_env.get('self_created') and 'secret' in envelope:
         deltas.append({
             'op': 'insert',
             'table': 'identities',
@@ -64,8 +64,8 @@ def project(envelope: Envelope) -> List[Delta]:
                 'identity_id': peer_id,
                 'network_id': network_id,
                 'name': name,
-                'private_key': envelope['local_metadata'].get('private_key'),
-                'public_key': envelope['local_metadata'].get('public_key'),
+                'private_key': envelope['secret'].get('private_key'),
+                'public_key': envelope['secret'].get('public_key'),
                 'created_at': created_at
             },
             'where': {}

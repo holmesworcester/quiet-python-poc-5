@@ -34,9 +34,15 @@ class TestMessageProjector:
                 'signature': 'test-signature'
             },
             'event_type': 'message',
+            'event_id': 'test-event-id',
             'peer_id': 'test-author',
             'network_id': 'test-network',
-            'validated': True  # Mark as validated for cast_envelope
+            'sig_checked': True,
+            'event_type': 'message',
+            'event_id': 'test-event-id',
+            'peer_id': 'test-author',
+            'sig_checked': True,
+            'validated': True
         }
     
     @pytest.mark.unit
@@ -91,6 +97,10 @@ class TestMessageProjector:
                 'created_at': int(time.time() * 1000),
                 'signature': 'test-signature'
             },
+            'event_type': 'message',
+            'event_id': 'test-event-id',
+            'peer_id': 'test-author',
+            'sig_checked': True,
             'validated': True
         }
         
@@ -115,6 +125,10 @@ class TestMessageProjector:
                 'created_at': int(time.time() * 1000),
                 'signature': 'test-signature'
             },
+            'event_type': 'message',
+            'event_id': 'test-event-id',
+            'peer_id': 'test-author',
+            'sig_checked': True,
             'validated': True
         }
         
@@ -177,6 +191,10 @@ class TestMessageProjector:
                 'created_at': 1000,
                 'signature': 'sig-1'
             },
+            'event_type': 'message',
+            'event_id': 'test-event-id',
+            'peer_id': 'test-author',
+            'sig_checked': True,
             'validated': True
         }
         
@@ -193,6 +211,10 @@ class TestMessageProjector:
                 'created_at': 2000,
                 'signature': 'sig-2'
             },
+            'event_type': 'message',
+            'event_id': 'test-event-id',
+            'peer_id': 'test-author',
+            'sig_checked': True,
             'validated': True
         }
         

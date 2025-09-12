@@ -15,22 +15,28 @@ from .db import get_connection, init_database
 class API:
     """Protocol API client using OpenAPI spec for operation discovery."""
     
-    def __init__(self, protocol_dir: Path, reset_db: bool = True):
+    def __init__(self, protocol_dir: Path, reset_db: bool = True, db_path: Optional[Path] = None):
         """
         Initialize API client.
         
         Args:
             protocol_dir: Protocol directory path containing openapi.yaml
             reset_db: Whether to reset database on init
+            db_path: Custom database path (defaults to protocol_dir/demo.db)
         """
         self.protocol_dir = Path(protocol_dir)
         
         # Database path
-        self.db_path = self.protocol_dir / "demo.db"
+        self.db_path = db_path if db_path else self.protocol_dir / "demo.db"
         
         # Reset database if requested
         if reset_db and self.db_path.exists():
             os.remove(self.db_path)
+        
+        # Initialize database with protocol schema
+        db = get_connection(str(self.db_path))
+        init_database(db, str(self.protocol_dir))
+        db.close()
         
         # Initialize pipeline runner
         self.runner = PipelineRunner(
@@ -49,8 +55,8 @@ class API:
         # Parse operations from OpenAPI spec
         self._parse_operations()
         
-        # Register commands and queries
-        self._register_operations()
+        # Discover and register implementations
+        self._discover_implementations()
     
     def _parse_operations(self):
         """Parse operations from OpenAPI spec."""
@@ -67,8 +73,8 @@ class API:
                         'spec': spec
                     }
     
-    def _register_operations(self):
-        """Register commands and queries discovered from OpenAPI spec."""
+    def _discover_implementations(self):
+        """Discover command and query implementations for operations."""
         import sys
         protocol_root = self.protocol_dir.parent.parent
         if str(protocol_root) not in sys.path:
@@ -78,49 +84,44 @@ class API:
         from core.processor import command_registry
         from core.query import query_registry
         
-        # Find all event directories
-        events_dir = self.protocol_dir / "events"
-        if not events_dir.exists():
-            return
+        # Protocol implementations could be organized in any way
+        # We'll search for Python files that might contain implementations
+        protocol_name = self.protocol_dir.name
         
-        # For each operation, try to find and import the corresponding function
-        for operation_id, info in self.operations.items():
-            # Determine event type from path (e.g., /identities -> identity)
-            path_parts = info['path'].strip('/').split('/')
-            if path_parts:
-                event_type = path_parts[0].rstrip('s')  # Remove plural 's'
+        # Look for all Python files in the protocol directory
+        for py_file in self.protocol_dir.rglob("*.py"):
+            # Skip __pycache__ and test files
+            if '__pycache__' in str(py_file) or 'test_' in py_file.name:
+                continue
+            
+            # Convert file path to module path
+            relative_path = py_file.relative_to(self.protocol_dir.parent.parent)
+            module_parts = list(relative_path.parts[:-1]) + [relative_path.stem]
+            module_path = '.'.join(module_parts)
+            
+            try:
+                # Import the module
+                module = __import__(module_path, fromlist=['*'])
                 
-                # Check if event type directory exists
-                event_dir = events_dir / event_type
-                if not event_dir.exists():
-                    continue
+                # Look for functions that match operation IDs
+                for operation_id in self.operations:
+                    if hasattr(module, operation_id):
+                        func = getattr(module, operation_id)
+                        if callable(func):
+                            # Determine if it's a command or query based on method
+                            operation = self.operations[operation_id]
+                            if operation['method'] == 'post':
+                                # Register as command if it has the command marker
+                                if getattr(func, '_is_command', False):
+                                    command_registry.register(operation_id, func)
+                            elif operation['method'] == 'get':
+                                # Register as query if it has the query marker
+                                if getattr(func, '_is_query', False):
+                                    query_registry.register(operation_id, func)
                 
-                try:
-                    if info['method'] == 'post':
-                        # Import commands module
-                        module_path = f'protocols.{self.protocol_dir.name}.events.{event_type}.commands'
-                        module = __import__(module_path, fromlist=[operation_id])
-                        
-                        # Register command if it exists
-                        if hasattr(module, operation_id):
-                            command_func = getattr(module, operation_id)
-                            command_registry.register(operation_id, command_func)
-                    
-                    elif info['method'] == 'get':
-                        # Import queries module and register with operation ID
-                        module_path = f'protocols.{self.protocol_dir.name}.events.{event_type}.queries'
-                        module = __import__(module_path, fromlist=['*'])
-                        
-                        # Find query functions in the module
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if callable(attr) and getattr(attr, '_is_query', False):
-                                # Register with operation ID
-                                query_registry.register(operation_id, attr)
-                        
-                except ImportError as e:
-                    # Silently skip - not all operations may be implemented
-                    pass
+            except ImportError:
+                # Module couldn't be imported, skip it
+                pass
     
     def execute_operation(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Any:
         """Execute an operation by its OpenAPI operation ID."""
@@ -144,7 +145,6 @@ class API:
         
         # Get database connection
         db = get_connection(str(self.db_path))
-        init_database(db, str(self.protocol_dir))
         
         try:
             # Execute command through registry
@@ -179,8 +179,7 @@ class API:
         db = get_connection(str(self.db_path))
         
         try:
-            # Execute query through registry using operation_id directly
-            # The queries should be registered with their operation IDs
+            # Execute query through registry using operation_id
             result = query_registry.execute(operation_id, db, params or {})
             return result
             

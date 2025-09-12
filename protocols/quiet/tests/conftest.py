@@ -105,7 +105,7 @@ def sample_transit_secret_event(test_identity):
     
     event = {
         "type": "transit_secret",
-        "secret_id": "test-secret-id",
+        "transit_key_id": "test-transit-key-id",
         "peer_id": test_identity["peer_id"],
         "network_id": test_identity["network_id"],
         "created_at": int(time.time() * 1000),
