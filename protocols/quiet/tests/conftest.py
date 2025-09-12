@@ -62,6 +62,7 @@ def sample_identity_event(test_identity):
         "type": "identity",
         "peer_id": test_identity["peer_id"],
         "network_id": test_identity["network_id"],
+        "name": "Test User",
         "created_at": int(time.time() * 1000)
     }
     
