@@ -2,45 +2,43 @@
 Validator for user events.
 """
 from typing import Dict, Any
+from core.types import Envelope, validator, validate_envelope_fields
+from protocols.quiet.events import UserEventData, validate_event_data
 
 
-def validate(event_data: Dict[str, Any], metadata: Dict[str, Any]) -> bool:
+@validator
+def validate(envelope: Envelope) -> bool:
     """
     Validate a user event.
     
-    User events store network address information for P2P connectivity.
-    
-    Checks:
-    - Has required fields
-    - User ID is valid
-    - Peer ID matches signer
-    - Port is in valid range
+    Returns True if valid, False otherwise.
     """
-    # Check required fields
-    required = ['type', 'user_id', 'peer_id', 'network_id', 'address', 'port', 'created_at', 'signature']
-    for field in required:
-        if field not in event_data:
-            return False
-    
-    # Check type
-    if event_data['type'] != 'user':
+    # Ensure we have event_plaintext
+    if not validate_envelope_fields(envelope, {'event_plaintext'}):
         return False
     
-    # Check peer_id matches metadata (the signer)
-    if event_data['peer_id'] != metadata.get('peer_id'):
+    event = envelope['event_plaintext']
+    
+    # Use the registry validator
+    if not validate_event_data('user', event):
+        return False
+    
+    # User-specific validation
+    # Check peer_id matches envelope peer_id if available
+    if 'peer_id' in envelope and event['peer_id'] != envelope['peer_id']:
         return False
     
     # Validate port is in valid range
-    port = event_data.get('port')
-    if not isinstance(port, int) or port < 1 or port > 65535:
+    port = event.get('port')
+    if port is not None and (not isinstance(port, int) or port < 1 or port > 65535):
         return False
     
     # Validate address is not empty
-    if not event_data.get('address') or not isinstance(event_data['address'], str):
+    if 'address' in event and (not event['address'] or not isinstance(event['address'], str)):
         return False
     
     # Validate network_id is not empty
-    if not event_data.get('network_id'):
+    if 'network_id' in event and not event['network_id']:
         return False
     
     return True

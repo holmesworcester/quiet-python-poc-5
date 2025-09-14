@@ -16,7 +16,7 @@ sys.path.insert(0, str(project_root))
 from protocols.quiet.events.user.commands import create_user, join_network
 from protocols.quiet.events.identity.commands import create_identity
 from protocols.quiet.events.invite.commands import create_invite
-from core.processor import process_envelope
+from protocols.quiet.tests.conftest import process_envelope
 from core.crypto import verify
 
 

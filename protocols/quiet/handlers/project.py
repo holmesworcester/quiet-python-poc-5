@@ -54,11 +54,13 @@ class ProjectHandler(Handler):
             
             # Run projector - it should emit deltas
             deltas = projector.project(envelope)
+            print(f"[project] Generated {len(deltas) if deltas else 0} deltas")
             
             # Apply deltas
             from core.deltas import DeltaApplicator
             if deltas:
                 for delta in deltas:
+                    print(f"[project] Applying delta: {delta}")
                     DeltaApplicator.apply(delta, db)
             
             # Mark as projected and include deltas
@@ -66,13 +68,19 @@ class ProjectHandler(Handler):
             envelope['deltas'] = deltas
             
             # If this event unblocks others, emit unblock events
-            unblock_envelopes = self._check_unblocks(envelope.get('event_id'), db)
+            try:
+                unblock_envelopes = self._check_unblocks(envelope.get('event_id'), db)
+            except sqlite3.OperationalError:
+                # Table doesn't exist yet
+                unblock_envelopes = []
             
             db.commit()
             
             return [envelope] + unblock_envelopes
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             db.rollback()
             envelope['error'] = f"Projection failed: {str(e)}"
             envelope['projected'] = True  # Mark as projected even on error to prevent loops

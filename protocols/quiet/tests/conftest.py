@@ -18,6 +18,15 @@ from core.crypto import generate_keypair, sign
 from core.processor import command_registry, PipelineRunner
 
 
+def process_envelope(envelope, db):
+    """Helper to process a single envelope through the pipeline."""
+    # Get the database path from the connection
+    db_path = db.execute("PRAGMA database_list").fetchone()[2]
+    runner = PipelineRunner(db_path=db_path, verbose=False)
+    protocol_dir = Path(__file__).parent.parent
+    runner.run(protocol_dir=str(protocol_dir), input_envelopes=[envelope])
+
+
 @pytest.fixture
 def temp_db():
     """Create a temporary database for testing."""

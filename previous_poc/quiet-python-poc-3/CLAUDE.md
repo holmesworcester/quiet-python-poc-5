@@ -8,6 +8,8 @@ This is an event-driven P2P messaging framework with a simulated Tor-like networ
 
 ## Key Commands
 
+use venv!!!
+
 ```bash
 # Setup virtual environment and install dependencies
 python -m venv venv

@@ -327,21 +327,34 @@ def command(func: Callable[[dict[str, Any]], Envelope]) -> Callable[[dict[str, A
     _check_no_db_access(func)
     
     @functools.wraps(func)
-    def wrapper(params: dict[str, Any]) -> Envelope:
+    def wrapper(params: dict[str, Any]) -> Union[Envelope, list[Envelope]]:
         # Runtime type checking
         if not isinstance(params, dict):
             raise TypeError(f"Expected dict for params, got {type(params).__name__}")
         
         result = func(params)
         
-        if not isinstance(result, dict):
-            raise TypeError(f"{func.__name__} must return Envelope (dict), got {type(result).__name__}")
-        
-        # Ensure required command envelope fields
-        required = {'event_plaintext', 'event_type', 'self_created', 'deps'}
-        missing = required - set(result.keys())
-        if missing:
-            raise ValueError(f"{func.__name__} envelope missing required fields: {missing}")
+        # Handle both single envelope and list of envelopes
+        if isinstance(result, list):
+            # Validate each envelope in the list
+            for i, env in enumerate(result):
+                if not isinstance(env, dict):
+                    raise TypeError(f"{func.__name__} envelope[{i}] must be dict, got {type(env).__name__}")
+                
+                # Ensure required command envelope fields
+                required = {'event_plaintext', 'event_type', 'self_created', 'deps'}
+                missing = required - set(env.keys())
+                if missing:
+                    raise ValueError(f"{func.__name__} envelope[{i}] missing required fields: {missing}")
+        elif isinstance(result, dict):
+            # Validate single envelope
+            # Ensure required command envelope fields
+            required = {'event_plaintext', 'event_type', 'self_created', 'deps'}
+            missing = required - set(result.keys())
+            if missing:
+                raise ValueError(f"{func.__name__} envelope missing required fields: {missing}")
+        else:
+            raise TypeError(f"{func.__name__} must return Envelope (dict) or List[Envelope], got {type(result).__name__}")
         
         return result
     

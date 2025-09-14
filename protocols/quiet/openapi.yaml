@@ -27,6 +27,73 @@ info:
 # ===========================================================================================
 paths:
   # =========================================================================================
+  # NETWORK MANAGEMENT
+  # =========================================================================================
+  
+  /networks:
+    post:
+      summary: Create a new network
+      operationId: create_network
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  description: Name of the network
+                description:
+                  type: string
+                  description: Optional description
+                creator_name:
+                  type: string
+                  description: Name for the creator identity
+      responses:
+        '200':
+          description: Network created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  network_id:
+                    type: string
+                  name:
+                    type: string
+                  creator_id:
+                    type: string
+                  created_at:
+                    type: integer
+
+    get:
+      summary: List all networks
+      operationId: get_networks
+      responses:
+        '200':
+          description: List of networks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    network_id:
+                      type: string
+                    name:
+                      type: string
+                    description:
+                      type: string
+                    creator_id:
+                      type: string
+                    created_at:
+                      type: integer
+
+  # =========================================================================================
   # IDENTITY MANAGEMENT
   # =========================================================================================
   
@@ -64,7 +131,7 @@ paths:
 
     get:
       summary: List all identities
-      operationId: list_identities
+      operationId: get_identities
       responses:
         '200':
           description: List of identities
@@ -81,6 +148,431 @@ paths:
                       type: string
                     created_at:
                       type: integer
+
+  # =========================================================================================
+  # USER MANAGEMENT
+  # =========================================================================================
+  
+  /users/join:
+    post:
+      summary: Join a network using an invite code
+      operationId: join_network
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - invite_code
+              properties:
+                invite_code:
+                  type: string
+                  description: Invite code to join with
+                name:
+                  type: string
+                  description: Name for the new user
+                network_id:
+                  type: string
+                  description: Network ID from invite
+                inviter_id:
+                  type: string
+                  description: ID of the inviter
+      responses:
+        '200':
+          description: Successfully joined network
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  identity_id:
+                    type: string
+                  peer_id:
+                    type: string
+                  network_id:
+                    type: string
+
+  /users:
+    post:
+      summary: Create a user event for an identity
+      operationId: create_user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - identity_id
+                - network_id
+              properties:
+                identity_id:
+                  type: string
+                network_id:
+                  type: string
+                address:
+                  type: string
+                  default: "0.0.0.0"
+                port:
+                  type: integer
+                  default: 0
+      responses:
+        '200':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  peer_id:
+                    type: string
+                  network_id:
+                    type: string
+
+    get:
+      summary: List users in a network
+      operationId: get_users
+      parameters:
+        - name: network_id
+          in: query
+          schema:
+            type: string
+          description: Filter by network ID
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user_id:
+                      type: string
+                    peer_id:
+                      type: string
+                    network_id:
+                      type: string
+                    address:
+                      type: string
+                    port:
+                      type: integer
+
+  # =========================================================================================
+  # GROUP MANAGEMENT
+  # =========================================================================================
+  
+  /groups:
+    post:
+      summary: Create a new group
+      operationId: create_group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - network_id
+                - identity_id
+              properties:
+                name:
+                  type: string
+                  description: Name of the group
+                network_id:
+                  type: string
+                identity_id:
+                  type: string
+                  description: Identity creating the group
+      responses:
+        '200':
+          description: Group created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  group_id:
+                    type: string
+                  name:
+                    type: string
+                  network_id:
+                    type: string
+                  creator_id:
+                    type: string
+
+    get:
+      summary: List groups in a network
+      operationId: get_groups
+      parameters:
+        - name: network_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Network to list groups from
+      responses:
+        '200':
+          description: List of groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    group_id:
+                      type: string
+                    name:
+                      type: string
+                    network_id:
+                      type: string
+                    owner_id:
+                      type: string
+
+  # =========================================================================================
+  # CHANNEL MANAGEMENT
+  # =========================================================================================
+  
+  /channels:
+    post:
+      summary: Create a new channel in a group
+      operationId: create_channel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - group_id
+                - identity_id
+              properties:
+                name:
+                  type: string
+                  description: Name of the channel
+                group_id:
+                  type: string
+                identity_id:
+                  type: string
+                  description: Identity creating the channel
+                network_id:
+                  type: string
+                  description: Network ID
+      responses:
+        '200':
+          description: Channel created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channel_id:
+                    type: string
+                  name:
+                    type: string
+                  group_id:
+                    type: string
+
+    get:
+      summary: List channels in a group
+      operationId: get_channels
+      parameters:
+        - name: group_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Group to list channels from
+      responses:
+        '200':
+          description: List of channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    channel_id:
+                      type: string
+                    name:
+                      type: string
+                    group_id:
+                      type: string
+
+  # =========================================================================================
+  # MESSAGE MANAGEMENT
+  # =========================================================================================
+  
+  /messages:
+    post:
+      summary: Create a new message
+      operationId: create_message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+                - channel_id
+                - identity_id
+              properties:
+                content:
+                  type: string
+                  description: Message content
+                channel_id:
+                  type: string
+                identity_id:
+                  type: string
+                  description: Identity sending the message
+                reply_to:
+                  type: string
+                  description: Optional message ID to reply to
+      responses:
+        '200':
+          description: Message created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message_id:
+                    type: string
+                  channel_id:
+                    type: string
+                  content:
+                    type: string
+
+    get:
+      summary: List messages in a channel
+      operationId: get_messages
+      parameters:
+        - name: channel_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Channel to list messages from
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of messages to return
+      responses:
+        '200':
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    message_id:
+                      type: string
+                    content:
+                      type: string
+                    channel_id:
+                      type: string
+                    author_id:
+                      type: string
+                    created_at:
+                      type: integer
+
+  # =========================================================================================
+  # INVITE MANAGEMENT
+  # =========================================================================================
+  
+  /invites:
+    post:
+      summary: Create an invite to join a network
+      operationId: create_invite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - network_id
+                - identity_id
+              properties:
+                network_id:
+                  type: string
+                identity_id:
+                  type: string
+                  description: Identity creating the invite
+                invite_code:
+                  type: string
+                  description: Optional custom invite code
+                expires_in_days:
+                  type: integer
+                  default: 7
+      responses:
+        '200':
+          description: Invite created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invite_code:
+                    type: string
+                  network_id:
+                    type: string
+                  expires_at:
+                    type: integer
+
+  # =========================================================================================
+  # GROUP MEMBERSHIP
+  # =========================================================================================
+  
+  /groups/members:
+    post:
+      summary: Add a user to a group
+      operationId: create_add
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - group_id
+                - user_id
+                - identity_id
+                - network_id
+              properties:
+                group_id:
+                  type: string
+                user_id:
+                  type: string
+                  description: User to add to the group
+                identity_id:
+                  type: string
+                  description: Identity performing the add
+                network_id:
+                  type: string
+      responses:
+        '200':
+          description: User added to group successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added:
+                    type: boolean
 
   # =========================================================================================
   # KEY MANAGEMENT

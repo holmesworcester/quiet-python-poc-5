@@ -16,7 +16,7 @@ from protocols.quiet.events.channel.commands import create_channel
 from protocols.quiet.events.identity.commands import create_identity
 from protocols.quiet.events.network.commands import create_network
 from protocols.quiet.events.group.commands import create_group
-from core.processor import process_envelope
+from protocols.quiet.tests.conftest import process_envelope
 
 
 class TestChannelCommand:
@@ -26,9 +26,9 @@ class TestChannelCommand:
     def setup_network_and_identity(self, initialized_db):
         """Create identity, network, and group for channel tests."""
         # Create identity
-        identity_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        process_envelope(identity_envelopes[0], initialized_db)
-        identity_id = identity_envelopes[0]["event_plaintext"]["peer_id"]
+        identity_envelope = create_identity({"network_id": "test-network"})
+        process_envelope(identity_envelope, initialized_db)
+        identity_id = identity_envelope["event_plaintext"]["peer_id"]
         
         # Create network
         network_params = {
@@ -62,7 +62,6 @@ class TestChannelCommand:
             "name": "general",
             "group_id": group_id,
             "identity_id": identity_id,
-            "description": "General discussion"
         }
         
         envelopes = create_channel(params, initialized_db)
@@ -85,29 +84,28 @@ class TestChannelCommand:
         assert event["group_id"] == group_id
         assert event["network_id"] == network_id
         assert event["creator_id"] == identity_id
-        assert event["description"] == "General discussion"
         assert "channel_id" in event
         assert "created_at" in event
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_channel_missing_params(self, initialized_db):
+    def test_create_channel_missing_params(self):
         """Test that missing required params raise errors."""
         # Missing name
         with pytest.raises(ValueError, match="name, group_id, and identity_id are required"):
-            create_channel({"group_id": "test-group", "identity_id": "test-id"}, initialized_db)
+            create_channel({"group_id": "test-group", "identity_id": "test-id"})
         
         # Missing group_id
         with pytest.raises(ValueError, match="name, group_id, and identity_id are required"):
-            create_channel({"name": "general", "identity_id": "test-id"}, initialized_db)
+            create_channel({"name": "general", "identity_id": "test-id"})
         
         # Missing identity_id
         with pytest.raises(ValueError, match="name, group_id, and identity_id are required"):
-            create_channel({"name": "general", "group_id": "test-group"}, initialized_db)
+            create_channel({"name": "general", "group_id": "test-group"})
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_channel_invalid_identity(self, initialized_db):
+    def test_create_channel_invalid_identity(self):
         """Test that invalid identity raises error."""
         params = {
             "name": "general",
@@ -171,7 +169,7 @@ class TestChannelCommand:
             "group_id": group_id,
             "identity_id": identity_id
         }
-        envelopes1 = create_channel(params1, initialized_db)
+        envelopes1 = create_channel(params1)
         channel_id1 = envelopes1[0]["event_plaintext"]["channel_id"]
         
         # Create second channel
@@ -180,7 +178,7 @@ class TestChannelCommand:
             "group_id": group_id,
             "identity_id": identity_id
         }
-        envelopes2 = create_channel(params2, initialized_db)
+        envelopes2 = create_channel(params2)
         channel_id2 = envelopes2[0]["event_plaintext"]["channel_id"]
         
         # Should have different channel IDs
@@ -221,5 +219,5 @@ class TestChannelCommand:
         envelopes = create_channel(params, initialized_db)
         event = envelopes[0]["event_plaintext"]
         
-        # Description should be empty string
-        assert event["description"] == ""
+        # No description field for channels
+        assert "description" not in event

@@ -18,3 +18,21 @@ the project feels disorganized. event_types should have all of our types as subd
 │   commands.  
 
 - where to locate the event store is a little weird. i'm putting it in a handler now, but then it's a bit weird to figure out where it fits in the pipeline. this should be easy to change though. 
+
+- TODO: make most validators not duplicate stuff from the generic validate step
+- TODO: fix bug in poc-3 groups
+
+Ways to challenge the design:
+
+- Add files but in the less-efficient way where blocks are still signed, to test the file storage efficiency part without worrying about signature inefficiency (test if special casing is needed)
+- Make a bittorrent-like UI using our proposed file transfer scheme (perf for large-ish files!)
+- Make a real holepunching system where non-NATed peers help NATed peers connect.
+- maybe: make a bittorrent-like protocol under the hood (blocks, hashes, give/get, etc) 
+- Make a todo-mvc or Trello
+- Make something like Telegram channels, or shared ownership of a Twitter feed, community can post comments, peers participating in two communtiies and acting as the bridge between them.
+- Tables at an event. Proposals, post its, votes, approval voting. 
+- Replicate the reddit moderation interface
+- closed-world twitter...  AND with features for posting as a team? They would follow others and have their mentions and would decide together what to repost, and if to reword. tweeting, debating what to tweet, working through DMs, adding someone to the group, removing someone from the group, etc. 
+- Vetting new community members with an application form 
+- ban together flow. Curate ban lists for others to use. 
+- Real time, performance, permissioning

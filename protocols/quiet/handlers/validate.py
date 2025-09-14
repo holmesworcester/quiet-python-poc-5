@@ -8,7 +8,7 @@ import importlib
 from core.handler import Handler
 from core.types import Envelope, validate_envelope_fields
 from protocols.quiet.envelope_types import ValidatableEvent, BaseEnvelope
-from protocols.quiet.handlers.event_store_handler import purge_event
+from protocols.quiet.handlers.event_store import purge_event
 
 
 class ValidateHandler(Handler):

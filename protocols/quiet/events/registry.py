@@ -39,10 +39,9 @@ class KeyEventData(TypedDict):
 class TransitSecretEventData(TypedDict):
     """Transit secret event data structure"""
     type: Literal["transit_secret"]
-    key_id: str
+    transit_key_id: str
     peer_id: str
     network_id: str
-    secret: str  # The actual secret (only in local_metadata)
     created_at: int
     signature: str
 

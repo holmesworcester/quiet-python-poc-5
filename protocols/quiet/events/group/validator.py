@@ -2,41 +2,30 @@
 Validator for group events.
 """
 from typing import Dict, Any
+from core.types import Envelope, validator, validate_envelope_fields
+from protocols.quiet.events import GroupEventData, validate_event_data
 
 
-def validate(event_data: Dict[str, Any], metadata: Dict[str, Any]) -> bool:
+@validator
+def validate(envelope: Envelope) -> bool:
     """
     Validate a group event.
     
-    Checks:
-    - Has required fields
-    - Group ID is valid
-    - Creator is the signer
-    - Permissions are valid
+    Returns True if valid, False otherwise.
     """
-    # Check required fields
-    required = ['type', 'group_id', 'name', 'network_id', 'creator_id', 'created_at', 'permissions']
-    for field in required:
-        if field not in event_data:
-            return False
-    
-    # Check type
-    if event_data['type'] != 'group':
+    # Ensure we have event_plaintext
+    if not validate_envelope_fields(envelope, {'event_plaintext'}):
         return False
     
-    # Check creator matches peer_id (the signer)
-    if event_data['creator_id'] != metadata.get('peer_id'):
+    event = envelope['event_plaintext']
+    
+    # Use the registry validator
+    if not validate_event_data('group', event):
         return False
     
-    # Check permissions structure
-    perms = event_data.get('permissions', {})
-    if not isinstance(perms, dict):
+    # Group-specific validation
+    # Check creator matches peer_id (the signer) if available
+    if 'peer_id' in envelope and event['creator_id'] != envelope['peer_id']:
         return False
-    
-    # Basic permission validation
-    valid_perms = ['invite', 'remove', 'message']
-    for perm in perms:
-        if perm not in valid_perms:
-            return False
     
     return True

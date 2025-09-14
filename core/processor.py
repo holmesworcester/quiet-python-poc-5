@@ -31,17 +31,16 @@ class CommandRegistry:
             
         command = self._commands[name]
         
-        # Check if command uses old signature (with db parameter)
-        import inspect
-        sig = inspect.signature(command)
-        if len(sig.parameters) == 2:
-            # Old signature: (params, db) -> List[Envelope]
-            result = command(params, db)
-            return result if isinstance(result, list) else [result]
+        # Execute command with new signature: (params) -> Envelope or List[Envelope]
+        result = command(params)
+        
+        # Handle both single envelope and list of envelopes
+        if isinstance(result, list):
+            return result
+        elif result:
+            return [result]
         else:
-            # New signature: (params) -> Envelope
-            result = command(params)
-            return [result] if result else []
+            return []
         
     def list_commands(self) -> List[str]:
         """Return list of registered command names."""
@@ -142,6 +141,7 @@ class PipelineRunner:
         import os
         
         protocol_name = Path(protocol_dir).name
+        self.log(f"Loading handlers for protocol: {protocol_name}")
         
         # Load commands if available
         try:
@@ -176,6 +176,13 @@ class PipelineRunner:
                 handler_name = item.name[:-11]  # Remove _handler.py
                 # Import as normal Python module
                 module_name = f"protocols.{protocol_name}.handlers.{item.stem}"
+                self._load_handler_module(module_name, handler_name)
+            
+            # Also check for regular .py files
+            elif item.is_file() and item.name.endswith('.py') and item.name != '__init__.py':
+                handler_name = item.stem
+                module_name = f"protocols.{protocol_name}.handlers.{handler_name}"
+                self.log(f"Checking module: {module_name}")
                 self._load_handler_module(module_name, handler_name)
                 
     def _load_handler_module(self, module_name: str, handler_name: str):

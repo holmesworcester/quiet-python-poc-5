@@ -48,7 +48,7 @@ def filter_func(envelope: Envelope) -> bool:
         envelope.get('deps_included_and_valid') is True and
         'event_plaintext' in envelope):
         event_plaintext = envelope['event_plaintext']
-        if 'signature' not in event_plaintext:
+        if not event_plaintext.get('signature'):
             return True
     
     # Verify case: events with plaintext that need sig checking
@@ -73,7 +73,7 @@ def handler(envelope: Envelope) -> Envelope:
     event_plaintext = envelope.get('event_plaintext', {})
     
     # Determine operation
-    if envelope.get('self_created') and 'signature' not in event_plaintext:
+    if envelope.get('self_created') and not event_plaintext.get('signature'):
         # Sign the event
         return sign_event(envelope)
     else:

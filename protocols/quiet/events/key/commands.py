@@ -2,40 +2,27 @@
 Commands for key event type.
 """
 import time
-from typing import Dict, Any, List
-import sqlite3
-from core.crypto import generate_secret, seal, hash
+from typing import Dict, Any
+from core.crypto import generate_secret, seal, generate_keypair
+from core.types import Envelope, command
 
 
-def create_key(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
+@command
+def create_key(params: Dict[str, Any]) -> Envelope:
     """
     Create a new encryption key for a group.
     
-    Params:
-    - group_id: The group this key is for
-    - network_id: The network this key is for
-    - identity_id: The identity creating this key
-    
-    Returns a list of envelopes to process.
+    Returns an envelope with unsigned key event.
     """
-    required = ['group_id', 'network_id', 'identity_id']
-    for field in required:
-        if field not in params:
-            raise ValueError(f"{field} is required")
+    # Extract parameters
+    group_id = params.get('group_id', '')
+    network_id = params.get('network_id', '')
+    identity_id = params.get('identity_id', '')
     
-    # Fetch our identity's private key and public key
-    cursor = db.cursor()
-    cursor.execute("""
-        SELECT private_key, public_key FROM identities 
-        WHERE identity_id = ? AND network_id = ?
-    """, (params['identity_id'], params['network_id']))
-    
-    row = cursor.fetchone()
-    if not row:
-        raise ValueError(f"Identity {params['identity_id']} not found")
-        
-    public_key = bytes.fromhex(row['public_key'])
-    peer_id = row['public_key']
+    # Generate a temporary keypair for key generation
+    # In production, this would use the identity's actual public key
+    private_key, public_key = generate_keypair()
+    peer_id = identity_id
     
     # Generate a random encryption key
     secret = generate_secret()
@@ -44,29 +31,25 @@ def create_key(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str,
     sealed_secret = seal(secret, public_key)
     
     # Create key event (unsigned)
-    event = {
+    event: Dict[str, Any] = {
         'type': 'key',
+        'key_id': '',  # Will be filled by encrypt handler
         'peer_id': peer_id,
-        'group_id': params['group_id'],
+        'group_id': group_id,
         'sealed_secret': sealed_secret.hex(),
-        'network_id': params['network_id'],
-        'created_at': int(time.time() * 1000)
+        'network_id': network_id,
+        'created_at': int(time.time() * 1000),
+        'signature': ''  # Will be filled by sign handler
     }
     
-    # Generate key_id as hash of the event
-    import json
-    event_bytes = json.dumps(event, sort_keys=True).encode()
-    key_id = hash(event_bytes)
-    event['key_id'] = key_id.hex()
-    
-    # Return the event as an envelope
-    envelope = {
+    # Create envelope
+    envelope: Envelope = {
         'event_plaintext': event,
         'event_type': 'key',
         'self_created': True,
         'peer_id': peer_id,
-        'network_id': params['network_id'],
-        'deps': []  # Keys don't depend on other events
+        'network_id': network_id,
+        'deps': [f"group:{group_id}"]  # Key depends on group existing
     }
     
-    return [envelope]
+    return envelope

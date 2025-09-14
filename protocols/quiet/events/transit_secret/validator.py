@@ -2,27 +2,30 @@
 Validator for transit secret events.
 """
 from typing import Dict, Any
+from core.types import Envelope, validator, validate_envelope_fields
+from protocols.quiet.events import TransitSecretEventData, validate_event_data
 
 
-def validate(event_data: Dict[str, Any], envelope_metadata: Dict[str, Any]) -> bool:
+@validator
+def validate(envelope: Envelope) -> bool:
     """
     Validate a transit secret event.
-    - Must have transit_key_id
-    - Must have network_id
-    - Must have peer_id
-    - Secret is NOT included (kept local only)
-    - Signature validation is handled by the framework
+    
+    Returns True if valid, False otherwise.
     """
-    if 'type' not in event_data or event_data['type'] != 'transit_secret':
+    # Ensure we have event_plaintext
+    if not validate_envelope_fields(envelope, {'event_plaintext'}):
         return False
-        
-    required_fields = ['transit_key_id', 'network_id', 'peer_id']
-    for field in required_fields:
-        if field not in event_data:
-            return False
-            
-    # Additional validation
-    if not event_data['transit_key_id'] or len(event_data['transit_key_id']) != 64:  # 32 bytes hex
+    
+    event = envelope['event_plaintext']
+    
+    # Use the registry validator
+    if not validate_event_data('transit_secret', event):
+        return False
+    
+    # Transit secret specific validation
+    # Additional validation for transit_key_id length if present
+    if 'transit_key_id' in event and (not event['transit_key_id'] or len(event['transit_key_id']) != 64):  # 32 bytes hex
         return False
         
     return True

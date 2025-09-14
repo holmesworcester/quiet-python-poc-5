@@ -17,7 +17,7 @@ from protocols.quiet.events.identity.commands import create_identity
 from protocols.quiet.events.network.commands import create_network
 from protocols.quiet.events.group.commands import create_group
 from protocols.quiet.events.channel.commands import create_channel
-from core.processor import process_envelope
+from protocols.quiet.tests.conftest import process_envelope
 
 
 class TestMessageCommand:
