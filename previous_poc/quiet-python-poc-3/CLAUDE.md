@@ -109,3 +109,6 @@ Based on recent commits, the project is transitioning from in-memory to persiste
 
 ## Upcoming Improvements
 - Add a way for projector tests to opt out of idempotency checks
+
+## Self QA
+- 

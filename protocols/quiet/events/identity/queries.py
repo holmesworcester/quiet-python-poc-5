@@ -14,6 +14,7 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         SELECT
             identity_id,
             network_id,
+            name,
             created_at
         FROM identities
         ORDER BY created_at DESC
@@ -25,7 +26,8 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         result.append({
             "identity_id": row[0],
             "network_id": row[1],
-            "created_at": row[2]
+            "name": row[2],
+            "created_at": row[3]
         })
     return result
 

@@ -20,8 +20,7 @@ def create_identity(params: Dict[str, Any]) -> dict[str, Any]:
         
     # Generate keypair
     private_key, public_key = generate_keypair()
-    peer_id = public_key.hex()
-    
+
     # Create identity event (local-only, not signed or shared)
     event: Dict[str, Any] = {
         'type': 'identity',
@@ -30,6 +29,7 @@ def create_identity(params: Dict[str, Any]) -> dict[str, Any]:
         'public_key': public_key.hex(),
         'created_at': int(time.time() * 1000)
         # No signature field - identity events are local-only
+        # No peer_id - that comes from a separate peer event
     }
 
     # Calculate identity_id as hash of the event

@@ -9,10 +9,6 @@ From plan.md:
 """
 from typing import Dict, List, Any, Optional, Set
 import sqlite3
-
-# Removed core.types import
-import sqlite3
-from typing import Optional, Dict, Any, Set
 import importlib
 from core.handlers import Handler
 
@@ -135,6 +131,9 @@ class RemoveHandler(Handler):
 
     def filter(self, envelope: dict[str, Any]) -> bool:
         """Check if this handler should process the envelope."""
+        if not isinstance(envelope, dict):
+            print(f"[remove] WARNING: filter got {type(envelope)} instead of dict: {envelope}")
+            return False
         return filter_func(envelope)
 
     def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:

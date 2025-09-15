@@ -23,31 +23,50 @@ def filter_func(envelope: dict[str, Any]) -> bool:
         'key_ref' in envelope and
         'event_plaintext' not in envelope):
         return True
-    
+
     # Encrypt case: validated plaintext that needs encryption
     if (envelope.get('validated') is True and
         'event_plaintext' in envelope and
         'event_ciphertext' not in envelope):
         return True
-    
+
+    # Seal case: has seal_to field and plaintext
+    if ('seal_to' in envelope and
+        'event_plaintext' in envelope and
+        'event_sealed' not in envelope):
+        return True
+
+    # Open sealed case: has event_sealed but no plaintext
+    if ('event_sealed' in envelope and
+        'event_plaintext' not in envelope):
+        return True
+
     return False
 
 
 def handler(envelope: dict[str, Any]) -> dict[str, Any]:
     """
     Handle event-level crypto operations.
-    
+
     Args:
         envelope: dict[str, Any] needing crypto operations
-        
+
     Returns:
         Transformed envelope
     """
-    # Determine operation type
+    # Handle seal operation (for sync requests)
+    if 'seal_to' in envelope and 'event_plaintext' in envelope:
+        return seal_event(envelope)
+
+    # Handle open sealed operation (for received sync requests)
+    if 'event_sealed' in envelope and 'event_plaintext' not in envelope:
+        return open_sealed_event(envelope)
+
+    # Determine operation type for regular crypto
     if 'key_ref' in envelope and 'event_plaintext' not in envelope:
         # Decrypt or unseal based on key_ref type
         key_ref = envelope['key_ref']
-        
+
         if isinstance(key_ref, dict) and key_ref.get('kind') == 'peer':
             # Key event - unseal using KEM to peer/prekey
             return unseal_key_event(envelope)
@@ -154,6 +173,93 @@ def encrypt_event(envelope: dict[str, Any]) -> dict[str, Any]:
     envelope['write_to_store'] = True
     
     return envelope
+
+
+def seal_event(envelope: dict[str, Any]) -> dict[str, Any]:
+    """
+    Seal an event to a peer's public key (one-way encryption).
+
+    Used for sync requests where the sender can't decrypt their own message.
+    """
+    from core.crypto import seal
+    import json
+
+    seal_to = envelope.get('seal_to')  # Peer ID to seal to
+    event_plaintext = envelope.get('event_plaintext')
+
+    if not seal_to or not event_plaintext:
+        envelope['error'] = "seal_to and event_plaintext required for sealing"
+        return envelope
+
+    # TODO: Get peer's public key from database
+    # For now, stub implementation
+    peer_public_key = b'stub_public_key_for_' + seal_to.encode()[:32].ljust(32, b'\0')
+
+    # Serialize plaintext
+    plaintext_bytes = json.dumps(event_plaintext).encode('utf-8')
+
+    # Seal to peer's public key
+    try:
+        # In real implementation, would use actual seal function
+        # envelope['event_sealed'] = seal(plaintext_bytes, peer_public_key)
+        envelope['event_sealed'] = b'sealed:' + plaintext_bytes  # Stub
+
+        # Remove plaintext after sealing
+        del envelope['event_plaintext']
+
+        # Mark for outgoing if specified
+        if envelope.get('is_outgoing'):
+            envelope['write_to_store'] = False  # Don't store outgoing sync requests
+
+    except Exception as e:
+        envelope['error'] = f"Failed to seal: {e}"
+
+    return envelope
+
+
+def open_sealed_event(envelope: dict[str, Any]) -> dict[str, Any]:
+    """
+    Open a sealed event using our private key.
+
+    Used for receiving sync requests sealed to our public key.
+    """
+    from core.crypto import unseal
+    import json
+
+    event_sealed = envelope.get('event_sealed')
+    if not event_sealed:
+        envelope['error'] = "event_sealed required for opening"
+        return envelope
+
+    # TODO: Get our private key from database
+    # For now, stub implementation
+    our_private_key = b'stub_private_key'.ljust(32, b'\0')
+    our_public_key = b'stub_public_key'.ljust(32, b'\0')
+
+    try:
+        # In real implementation, would use actual unseal function
+        # plaintext_bytes = unseal(event_sealed, our_private_key, our_public_key)
+
+        # Stub: just remove prefix
+        if event_sealed.startswith(b'sealed:'):
+            plaintext_bytes = event_sealed[7:]
+        else:
+            plaintext_bytes = event_sealed
+
+        # Parse plaintext
+        event_plaintext = json.loads(plaintext_bytes.decode('utf-8'))
+        envelope['event_plaintext'] = event_plaintext
+
+        # Sync requests are not stored
+        if event_plaintext.get('type') == 'sync_request':
+            envelope['write_to_store'] = False
+            envelope['is_sync_request'] = True
+
+    except Exception as e:
+        envelope['error'] = f"Failed to open sealed: {e}"
+
+    return envelope
+
 
 class EventCryptoHandler(Handler):
     """Handler for event crypto."""

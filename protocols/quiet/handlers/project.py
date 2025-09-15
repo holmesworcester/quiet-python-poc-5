@@ -28,6 +28,9 @@ class ProjectHandler(Handler):
     
     def filter(self, envelope: dict[str, Any]) -> bool:
         """Process validated events that haven't been projected."""
+        if not isinstance(envelope, dict):
+            print(f"[project] WARNING: filter got {type(envelope)} instead of dict")
+            return False
         return (
             envelope.get('validated') is True and
             envelope.get('projected') is not True
@@ -52,7 +55,7 @@ class ProjectHandler(Handler):
             # Handle local metadata for self-created identities
             if envelope.get('self_created') and 'local_metadata' in envelope:
                 self._store_local_metadata(envelope, db)
-            
+
             # Run projector - it should emit deltas
             deltas = projector.project(envelope)
             print(f"[project] Generated {len(deltas) if deltas else 0} deltas")

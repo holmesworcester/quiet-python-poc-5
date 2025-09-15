@@ -14,7 +14,8 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
     Returns deltas to apply.
     """
     event_data = envelope.get('event_plaintext', {})
-    user_id = event_data['user_id']
+    # User ID is the event_id for user events
+    user_id = envelope['event_id']
     peer_id = event_data['peer_id']
     network_id = event_data['network_id']
     group_id = event_data['group_id']
@@ -42,7 +43,8 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
             'data': {
                 'group_id': group_id,
                 'user_id': user_id,
-                'joined_at': created_at
+                'added_by': event.get('added_by', user_id),  # Who added them (self if not specified)
+                'added_at': created_at
             }
         }
     ]

@@ -27,13 +27,17 @@ class TestChannelCommand:
         """Create identity, network, and group for channel tests."""
         # Create identity
         identity_envelope = create_identity({"network_id": "test-network"})
-        identity_id = identity_envelope["event_plaintext"]["peer_id"]
+        identity_id = identity_envelope["event_id"]
+
+        # For testing, use identity_id as peer_id (in real system, would create peer event)
+        # The peer_id would normally come from a peer event's event_id
+        peer_id = identity_id  # Simplified for testing
 
         # Use mock IDs since commands don't generate them
         network_id = "test-network-id"
         group_id = "test-group-id"
 
-        return identity_id, network_id, group_id
+        return peer_id, network_id, group_id
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -72,16 +76,16 @@ class TestChannelCommand:
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_channel_missing_params(self):
-        """Test that commands work with missing params (no validation)."""
-        # Commands don't validate - they just use defaults
+        """Test that commands provide sensible defaults for missing params."""
+        # Commands provide dummy data when params are missing
         envelope = create_channel({"group_id": "test-group", "identity_id": "test-id"})
-        assert envelope["event_plaintext"]["name"] == ""  # Empty default
+        assert envelope["event_plaintext"]["name"] == "unnamed-channel"  # Default name
 
         envelope = create_channel({"name": "general", "identity_id": "test-id"})
-        assert envelope["event_plaintext"]["group_id"] == ""  # Empty default
+        assert envelope["event_plaintext"]["group_id"] == "dummy-group-id"  # Default group
 
         envelope = create_channel({"name": "general", "group_id": "test-group"})
-        assert envelope["event_plaintext"]["creator_id"] == ""  # Empty default
+        assert envelope["event_plaintext"]["creator_id"] == "dummy-identity-id"  # Default creator
     
     @pytest.mark.unit
     @pytest.mark.event_type

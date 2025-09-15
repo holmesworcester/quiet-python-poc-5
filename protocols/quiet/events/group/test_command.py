@@ -2,6 +2,10 @@
 Tests for group commands.
 """
 import pytest
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))))
+
 from protocols.quiet.events.group.commands import create_group
 from protocols.quiet.tests.test_commands_base import CommandTestBase
 
@@ -53,6 +57,52 @@ class TestGroupCommands(CommandTestBase):
         
         print("✓ create_group no dependencies test passed")
 
+    def test_create_group_api_response(self):
+        """Test that create_group returns list of all groups via API."""
+        from core.api import API
+        from pathlib import Path
+
+        # Initialize API with test database
+        api = API(Path('protocols/quiet'), reset_db=True)
+
+        # First create an identity (required for group creation)
+        identity_result = api.create_identity({
+            'name': 'Alice',
+            'network_id': 'test_net'
+        })
+
+        identity_id = identity_result['ids']['identity']
+
+        # Create first group
+        group1_result = api.create_group({
+            'name': 'First Group',
+            'network_id': 'test_net',
+            'identity_id': identity_id
+        })
+
+        # Check that response includes groups list
+        assert 'groups' in group1_result, "Response should include groups list"
+        assert len(group1_result['groups']) >= 1, "Should have at least one group"
+
+        # Create second group
+        group2_result = api.create_group({
+            'name': 'Second Group',
+            'network_id': 'test_net',
+            'identity_id': identity_id
+        })
+
+        # Check that response includes both groups
+        assert 'groups' in group2_result, "Response should include groups list"
+        assert len(group2_result['groups']) >= 2, "Should have at least two groups"
+
+        # Verify both groups are in the list
+        group_names = [g['name'] for g in group2_result['groups']]
+        assert 'First Group' in group_names, "First group should be in list"
+        assert 'Second Group' in group_names, "Second group should be in list"
+
+        print(f"✓ create_group returned {len(group2_result['groups'])} groups")
+        print("✓ create_group API response test passed")
+
 
 def run_tests():
     """Run all group command tests."""
@@ -69,7 +119,11 @@ def run_tests():
     print("\n2. Testing create_group no dependencies:")
     print("-" * 40)
     test.test_create_group_no_dependencies()
-    
+
+    print("\n3. Testing create_group API response with query data:")
+    print("-" * 40)
+    test.test_create_group_api_response()
+
     print("\n" + "=" * 60)
     print("Group command tests complete!")
 

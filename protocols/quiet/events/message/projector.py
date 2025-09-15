@@ -17,12 +17,12 @@ def project(envelope: dict[str, Any]) -> List[dict[str, Any]]:
         return []
     
     event_data = envelope['event_plaintext']
-    
-    # Extract fields - we know this is a MessageEventData
-    message_id = event_data['message_id']
+
+    # Message ID is the event_id for message events
+    message_id = envelope['event_id']
     channel_id = event_data['channel_id']
-    group_id = event_data['group_id']
-    network_id = event_data['network_id']
+    group_id = event_data.get('group_id', '')
+    network_id = event_data.get('network_id', '')
     author_id = event_data['peer_id']  # Using peer_id as per MessageEventData
     content = event_data['content']
     created_at = event_data['created_at']

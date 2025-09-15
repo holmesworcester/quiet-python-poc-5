@@ -263,15 +263,31 @@ class PipelineRunner:
                 # Track the processed envelope (handlers may have modified it)
                 all_processed.append(envelope)
 
-                if self.verbose and emitted:
+                # Normalize emitted to always be a flat list of envelopes
+                normalized_emitted = []
+                for item in emitted:
+                    if isinstance(item, dict):
+                        # Single envelope
+                        normalized_emitted.append(item)
+                    elif isinstance(item, list):
+                        # List of envelopes (shouldn't happen but handle it)
+                        for subitem in item:
+                            if isinstance(subitem, dict):
+                                normalized_emitted.append(subitem)
+                            else:
+                                self.log(f"WARNING: Skipping non-dict item in emitted: {type(subitem)}")
+                    else:
+                        self.log(f"WARNING: Skipping non-dict/list item in emitted: {type(item)}")
+
+                if self.verbose and normalized_emitted:
                     for handler in registry._handlers:
                         if handler.filter(envelope):
                             self.log_envelope("CONSUMED", handler.name, envelope)
-                            for e in emitted:
+                            for e in normalized_emitted:
                                 self.log_envelope("EMITTED", handler.name, e)
 
                 # Add emitted envelopes to next queue
-                next_queue.extend(emitted)
+                next_queue.extend(normalized_emitted)
                 self.emitted_count += len(emitted)
 
             queue = next_queue

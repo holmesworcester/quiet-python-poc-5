@@ -27,13 +27,17 @@ def get_connection(db_path: str = "quiet.db") -> sqlite3.Connection:
 
 def init_database(conn: sqlite3.Connection, protocol_dir: Optional[str] = None) -> None:
     """Initialize database schema.
-    
-    The framework doesn't define any tables itself - all schema comes from:
+
+    The framework defines core tables and loads protocol-specific schema from:
     1. Handler-specific .schema.sql files in handlers/
     2. Event type-specific .schema.sql files in events/
     3. Any top-level .schema.sql files in the protocol directory
     """
-    
+
+    # Initialize core tables (job_runs for job scheduling)
+    from core.jobs import init_job_tables
+    init_job_tables(conn)
+
     if protocol_dir:
         import glob
         import os

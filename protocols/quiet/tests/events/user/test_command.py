@@ -14,7 +14,7 @@ protocol_dir = test_dir.parent.parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.events.user.commands import create_user, join_network
+from protocols.quiet.events.user.commands import create_user, join_as_user
 
 
 class TestUserCommand:

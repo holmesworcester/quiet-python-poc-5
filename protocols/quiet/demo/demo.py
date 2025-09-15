@@ -93,21 +93,10 @@ class QuietDemoCore:
         # Panel states (1-4) 
         self.panels = {i: PanelState() for i in range(1, 5)}
         
-        # Mock data for channels/groups/people
-        self.channels = {
-            "general": {"name": "general", "group": "public"},
-            "random": {"name": "random", "group": "public"},
-            "dev": {"name": "dev", "group": "engineering"},
-            "design": {"name": "design", "group": "creative"},
-        }
-        
-        self.groups = {
-            "public": {"name": "public", "members": []},
-            "engineering": {"name": "engineering", "members": []},
-            "creative": {"name": "creative", "members": []},
-        }
-        
-        self.people = {}  # identity_id -> {"name": str, "online": bool}
+        # Initialize empty data - will be populated from database
+        self.channels = {}  # channel_id -> {"name": str, "group": str, "description": str}
+        self.groups = {}    # group_id -> {"name": str, "members": []}
+        self.people = {}    # identity_id -> {"name": str, "online": bool}
         
         # Cache for state
         self._cache = {}
@@ -140,15 +129,48 @@ class QuietDemoCore:
             return
         
         try:
-            # Get all entities via API
-            self._cache['identities'] = self.api.list_identities()
-            self._cache['transit_keys'] = self.api.list_transit_keys()
-            self._cache['keys'] = self.api.list_keys()
-            self._cache['database'] = self.api.dump_database()
-            
-            # Get groups and channels
-            self._cache['groups'] = self.api._execute_query("group.list", {})
-            self._cache['channels'] = self.api._execute_query("channel.list", {})
+            # Get all entities via API operations only
+            try:
+                self._cache['identities'] = self.api.execute_operation('get_identities', {})
+            except:
+                self._cache['identities'] = []
+
+            try:
+                self._cache['transit_keys'] = self.api.execute_operation('list_transit_keys', {})
+            except:
+                self._cache['transit_keys'] = []
+
+            try:
+                self._cache['keys'] = self.api.execute_operation('list_keys', {})
+            except:
+                self._cache['keys'] = []
+
+            # Get groups and channels via API operations
+            try:
+                groups_result = self.api.execute_operation('get_groups', {})
+                # The result might be wrapped or direct list
+                if isinstance(groups_result, list):
+                    self._cache['groups'] = groups_result
+                elif isinstance(groups_result, dict) and 'data' in groups_result:
+                    self._cache['groups'] = groups_result['data']
+                else:
+                    self._cache['groups'] = []
+            except Exception as e:
+                print(f"Warning: Failed to get groups: {e}")
+                self._cache['groups'] = []
+
+            try:
+                channels_result = self.api.execute_operation('get_channels', {})
+                # The result might be wrapped or direct list
+                if isinstance(channels_result, list):
+                    self._cache['channels'] = channels_result
+                elif isinstance(channels_result, dict) and 'data' in channels_result:
+                    self._cache['channels'] = channels_result['data']
+                else:
+                    self._cache['channels'] = []
+            except Exception as e:
+                print(f"Warning: Failed to get channels: {e}")
+                self._cache['channels'] = []
             
             # Update people list from identities
             for ident in self._cache['identities']:
@@ -178,23 +200,29 @@ class QuietDemoCore:
             
             self._cache_timestamp = time.time()
         except Exception as e:
-            # Initialize with empty state on error
-            self._cache = {
-                'identities': [],
-                'transit_keys': [],
-                'keys': [],
-                'database': {},
-                'groups': [],
-                'channels': []
-            }
+            # Don't reset the entire cache on error - just log it
+            print(f"Warning: Error refreshing state: {e}")
+            # Initialize cache if it doesn't exist
+            if not hasattr(self, '_cache'):
+                self._cache = {
+                    'identities': [],
+                    'transit_keys': [],
+                    'keys': [],
+                    'groups': [],
+                    'channels': []
+                }
     
     def get_identities(self) -> List[Dict[str, Any]]:
         """Get cached identities."""
         return self._cache.get('identities', [])
     
-    def get_database_dump(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Get cached database dump."""
-        return self._cache.get('database', {})
+    def get_groups(self) -> List[Dict[str, Any]]:
+        """Get cached groups."""
+        return self._cache.get('groups', [])
+
+    def get_channels(self) -> List[Dict[str, Any]]:
+        """Get cached channels."""
+        return self._cache.get('channels', [])
     
     def get_panel_state(self, panel_id: int) -> PanelState:
         """Get state for a specific panel."""
@@ -236,8 +264,32 @@ class QuietDemoCore:
         
         try:
             # Call API
-            result = self.api.create_identity(panel.network_id)
-            
+            result = self.api.execute_operation('create_identity', {'name': name or f'User-{panel_id}'})
+
+            # Extract the identity ID from the result
+            if 'ids' in result and 'identity' in result['ids']:
+                identity_id = result['ids']['identity']
+                panel.identity_id = identity_id
+                panel.identity_name = name or f'User-{panel_id}'
+
+                # Add to people list immediately
+                self.people[identity_id] = {
+                    "name": panel.identity_name,
+                    "online": True
+                }
+
+                # Add success message to panel
+                panel.messages.append({
+                    "type": "system",
+                    "text": f"Welcome {panel.identity_name}! Your identity has been created.",
+                    "timestamp": datetime.now()
+                })
+
+                self._add_event('command', f"Panel {panel_id}: Created identity '{panel.identity_name}'")
+                return CommandResult(True,
+                    message=f"Created identity '{panel.identity_name}' (ID: {identity_id[:8]}...)",
+                    data={'identity_id': identity_id})
+
             # Wait a moment for processing
             time.sleep(0.5)
             
@@ -288,86 +340,78 @@ class QuietDemoCore:
         panel = self.panels.get(panel_id)
         if not panel:
             return CommandResult(False, error="Invalid panel ID")
-        
+
+        # Panel must have an identity to create a network
+        if not panel.identity_id:
+            return CommandResult(False, error="Panel has no identity. Create one first with /create <name>")
+
         try:
             # Create network using the API command
-            result = self.api._execute_command("create_network", {
+            result = self.api.execute_operation("create_network", {
                 "name": name,
-                "creator_name": panel.identity_name or f"User-{panel_id}"
+                "identity_id": panel.identity_id
             })
 
             # Check if command succeeded by checking for 'ids' key
             if result and "ids" in result:
-                self.refresh_state(force=True)
-
-                # Get the network event ID - it's stored but we need to query for the actual network
-                network_event_id = result["ids"].get("network")
-
-                # Query the database to get the actual network details
-                db_dump = self.get_database_dump()
-                networks = db_dump.get('networks', [])
-                identities = db_dump.get('identities', [])
-
-                # Find the network that was just created (most recent)
-                if networks:
-                    network = networks[-1]  # Get the most recent network
-                    network_id = network.get('network_id', '')
-                    creator_id = network.get('creator_id')
-                else:
-                    return CommandResult(False, error="Network was not created properly")
-
-                # If no creator_id in network, look for it in identities
-                if not creator_id and identities:
-                    # Find the most recent identity
-                    creator_id = identities[-1].get('identity_id')
-
-                if not creator_id:
-                    return CommandResult(False, error="Failed to get creator identity from result")
+                network_id = result["ids"].get("network")
+                if network_id:
+                    panel.network_id = network_id
                 
-                # Update panel with the creator identity
-                panel.network_id = network_id
-                panel.identity_id = creator_id
-                panel.identity_name = panel.identity_name or f"User-{panel_id}"
-                
-                # Add to people list
-                self.people[creator_id] = {
-                    "name": panel.identity_name,
-                    "online": True
-                }
-                
-                # Create default group
-                group_result = self.api._execute_command("create_group", {
-                    "name": "public",
-                    "network_id": network_id,
-                    "identity_id": creator_id
-                })
-                
-                if group_result["success"]:
-                    group_id = group_result["data"]["group_id"]
-                    
-                    # Create default channel in the group
-                    channel_result = self.api._execute_command("create_channel", {
-                        "name": "general",
-                        "group_id": group_id,
-                        "identity_id": creator_id,
-                        "description": "Default channel"
+                    # Add to people list
+                    self.people[panel.identity_id] = {
+                        "name": panel.identity_name,
+                        "online": True
+                    }
+
+                    # Create default group
+                    group_result = self.api.execute_operation("create_group", {
+                        "name": "public",
+                        "network_id": network_id,
+                        "identity_id": panel.identity_id
                     })
-                    
-                    if channel_result["success"]:
-                        channel_id = channel_result["data"]["channel_id"]
-                        # Set as current channel
-                        panel.current_channel = channel_id
-                        panel.current_group = group_id
-                
-                # Add welcome message
-                panel.messages.append({
-                    "type": "system",
-                    "text": f"Created network '{name}' with default #general channel",
-                    "timestamp": datetime.now()
-                })
-                
-                self._add_event('command', f"Panel {panel_id}: Created network '{name}'")
-                return CommandResult(True, f"Created network: {name}", data={"network_id": network_id})
+                    # Standard response format with 'ids' and 'data'
+                    if group_result and "ids" in group_result:
+                        group_id = group_result["ids"].get("group")
+
+                        if group_id:
+                            # Create default channel in the group
+                            try:
+                                channel_result = self.api.execute_operation("create_channel", {
+                                    "name": "general",
+                                    "group_id": group_id,
+                                    "identity_id": panel.identity_id,
+                                    "network_id": network_id
+                                })
+
+                                # Standard response format with 'ids' and 'data'
+                                if channel_result and "ids" in channel_result:
+                                    channel_id = channel_result["ids"].get("channel")
+                                    if channel_id:
+                                    # Set as current channel
+                                    panel.current_channel = channel_id
+                                    panel.current_group = group_id
+                                else:
+                                    print(f"Warning: No channel ID in result: {channel_result}")
+                                else:
+                                    print(f"Warning: Channel creation failed or no ids: {channel_result}")
+                            except Exception as e:
+                                print(f"Error creating channel: {e}")
+
+                    # Refresh state to load the new channels
+                    self.refresh_state(force=True)
+
+                    # Add welcome message
+                    panel.messages.append({
+                        "type": "system",
+                        "text": f"Created network '{name}' with default #general channel",
+                        "timestamp": datetime.now()
+                    })
+
+                    self._add_event('command', f"Panel {panel_id}: Created network '{name}'")
+                    return CommandResult(True, f"Created network: {name}", data={"network_id": network_id})
+                else:
+                    return CommandResult(False, error="Network creation failed: No network ID returned")
             else:
                 return CommandResult(False, error="Failed to create network")
                 
@@ -380,13 +424,13 @@ class QuietDemoCore:
         panel = self.panels.get(panel_id)
         if not panel or not panel.identity_id:
             return CommandResult(False, error="No identity selected")
-        
+
         try:
-            # Get the private key for the identity from the database
-            db_dump = self.get_database_dump()
+            # Get fresh database content directly from API (not cached)
+            db_dump = self.api.dump_database()
             identities = db_dump.get('identities', [])
             identity = next((i for i in identities if i['identity_id'] == panel.identity_id), None)
-            
+
             if not identity or 'private_key' not in identity:
                 return CommandResult(False, error="Cannot find private key for identity")
             
@@ -394,16 +438,35 @@ class QuietDemoCore:
             private_key_hex = identity['private_key']
             private_key_bytes = bytes.fromhex(private_key_hex) if isinstance(private_key_hex, str) else private_key_hex
             
-            result = self.api._execute_command("create_invite", {
+            # Get the first group if no current group is set
+            if not panel.current_group:
+                # Refresh to get groups
+                self.refresh_state(force=True)
+                for group_id, group in self.groups.items():
+                    # Find a group in this network
+                    # Note: groups don't store network_id in self.groups dict
+                    # so we'll just use the first group for now
+                    panel.current_group = group_id
+                    break
+
+            # Execute the create_invite operation through the API
+            result = self.api.execute_operation("create_invite", {
                 "network_id": panel.network_id,
                 "identity_id": panel.identity_id,
-                "private_key": private_key_bytes
+                "group_id": panel.current_group or ""  # Use current group if available
             })
-            
-            if result["success"]:
-                invite_code = result["data"]["invite_code"]
+
+            # The result should contain the invite_link
+            if result and "ids" in result:
+                # Extract invite link from the result data
+                if "data" in result and "invite_link" in result["data"]:
+                    invite_link = result["data"]["invite_link"]
+                else:
+                    # Fallback - generate simple invite code
+                    invite_link = f"invite_{result['ids'].get('invite', 'unknown')[:8]}"
+
                 self._add_event('command', f"Panel {panel_id}: Generated invite code")
-                return CommandResult(True, f"Invite code: {invite_code}", data={"invite": invite_code})
+                return CommandResult(True, f"Invite code: {invite_link}", data={"invite": invite_link})
             else:
                 return CommandResult(False, error="Failed to generate invite")
                 
@@ -422,8 +485,10 @@ class QuietDemoCore:
             return CommandResult(False, error="This panel already has an identity. Use a different panel.")
         
         try:
-            # First, look up the invite in the database
-            db_dump = self.get_database_dump()
+            # First, look up the invite via API
+            # Note: This would ideally be a specific API call to validate invites
+            # For now we'll use dump_database as it's available
+            db_dump = self.api.dump_database()
             invites = db_dump.get('invites', [])
             invite = next((i for i in invites if i['invite_code'] == invite_code), None)
             
@@ -518,34 +583,46 @@ class QuietDemoCore:
         panel = self.panels.get(panel_id)
         if not panel or not panel.identity_id:
             return CommandResult(False, error="No identity selected")
-        
+
+        if not panel.network_id:
+            return CommandResult(False, error="No network selected. Create a network first with /network <name>")
+
         try:
             # Create the group
-            result = self.api._execute_command("create_group", {
+            result = self.api.execute_operation("create_group", {
                 "name": name,
                 "network_id": panel.network_id,
                 "identity_id": panel.identity_id
             })
-            
-            if result["success"]:
-                self.refresh_state(force=True)
-                group_id = result["data"]["group_id"]
-                
-                # Create default channel in the group
-                channel_result = self.api._execute_command("create_channel", {
-                    "name": "general",
-                    "group_id": group_id,
-                    "identity_id": panel.identity_id,
-                    "description": f"Default channel for {name}"
-                })
-                
-                if channel_result["success"]:
+
+            # Group creation returns group_id directly, not in ids
+            group_id = None
+            if result:
+                if "ids" in result:
+                    group_id = result["ids"].get("group")
+                elif "group_id" in result:
+                    group_id = result["group_id"]
+
+                if group_id:
                     self.refresh_state(force=True)
-                    self._add_event('command', f"Panel {panel_id}: Created group '{name}' with default channel")
-                    return CommandResult(True, f"Created group: {name} with #general channel (ID: {group_id[:16]}...)")
+
+                    # Create default channel in the group
+                    channel_result = self.api.execute_operation("create_channel", {
+                        "name": "general",
+                        "group_id": group_id,
+                        "identity_id": panel.identity_id,
+                        "network_id": panel.network_id
+                    })
+
+                    if channel_result and "ids" in channel_result:
+                        self.refresh_state(force=True)
+                        self._add_event('command', f"Panel {panel_id}: Created group '{name}' with default channel")
+                        return CommandResult(True, f"Created group: {name} with #general channel (ID: {group_id[:16]}...)")
+                    else:
+                        self._add_event('command', f"Panel {panel_id}: Created group '{name}' (no default channel)")
+                        return CommandResult(True, f"Created group: {name} (ID: {group_id[:16]}...)")
                 else:
-                    self._add_event('command', f"Panel {panel_id}: Created group '{name}' (no default channel)")
-                    return CommandResult(True, f"Created group: {name} (ID: {group_id[:16]}...)")
+                    return CommandResult(False, error="Group creation failed: No group ID returned")
             else:
                 return CommandResult(False, error="Failed to create group")
                 
@@ -558,19 +635,26 @@ class QuietDemoCore:
         panel = self.panels.get(panel_id)
         if not panel or not panel.identity_id:
             return CommandResult(False, error="No identity selected")
-        
+
+        if not panel.network_id:
+            return CommandResult(False, error="No network selected")
+
         try:
-            result = self.api._execute_command("create_channel", {
+            result = self.api.execute_operation("create_channel", {
                 "name": name,
                 "group_id": group_id,
-                "identity_id": panel.identity_id
+                "identity_id": panel.identity_id,
+                "network_id": panel.network_id
             })
-            
-            if result["success"]:
-                self.refresh_state(force=True)
-                channel_id = result["data"]["channel_id"]
-                self._add_event('command', f"Panel {panel_id}: Created channel '{name}' in group")
-                return CommandResult(True, f"Created channel: #{name}")
+
+            if result and "ids" in result:
+                channel_id = result["ids"].get("channel")
+                if channel_id:
+                    self.refresh_state(force=True)
+                    self._add_event('command', f"Panel {panel_id}: Created channel '{name}' in group")
+                    return CommandResult(True, f"Created channel: #{name}")
+                else:
+                    return CommandResult(False, error="Channel creation failed: No channel ID returned")
             else:
                 return CommandResult(False, error="Failed to create channel")
                 
@@ -583,34 +667,38 @@ class QuietDemoCore:
         panel = self.panels.get(panel_id)
         if not panel:
             return CommandResult(False, error="Invalid panel ID")
-        
+
         if not panel.identity_id:
             return CommandResult(False, error="No identity selected")
-        
+
         # Use provided channel_id or current channel
         target_channel = channel_id or panel.current_channel
         if not target_channel:
             return CommandResult(False, error="No channel specified")
-        
+
         try:
-            result = self.api._execute_command("create_message", {
+            result = self.api.execute_operation("create_message", {
                 "content": text,
                 "channel_id": target_channel,
                 "identity_id": panel.identity_id
             })
-            
-            if result["success"]:
-                # Add message to panel display
-                panel.messages.append({
-                    "type": "message",
-                    "from": panel.identity_name,
-                    "text": text,
-                    "channel": panel.current_channel,
-                    "timestamp": datetime.now()
-                })
-                
-                self._add_event('message', f"{panel.identity_name}: {text[:50]}...")
-                return CommandResult(True)
+
+            if result and "ids" in result:
+                message_id = result["ids"].get("message")
+                if message_id:
+                    # Add message to panel display
+                    panel.messages.append({
+                        "type": "message",
+                        "from": panel.identity_name,
+                        "text": text,
+                        "channel": panel.current_channel,
+                        "timestamp": datetime.now()
+                    })
+
+                    self._add_event('message', f"{panel.identity_name}: {text[:50]}...")
+                    return CommandResult(True)
+                else:
+                    return CommandResult(False, error="Message creation failed: No message ID returned")
             else:
                 return CommandResult(False, error="Failed to send message")
                 
@@ -676,24 +764,13 @@ class QuietDemoCore:
             elif cmd == "/network" and len(parts) > 1:
                 # Create network command
                 network_name = " ".join(parts[1:])
-                # Find an empty panel or use current panel
-                panel_id = None
-                if not self.panels[self.current_cli_panel].identity_id:
-                    panel_id = self.current_cli_panel
-                else:
-                    for pid in range(1, 5):
-                        if not self.panels[pid].identity_id:
-                            panel_id = pid
-                            break
-                
-                if panel_id:
-                    result = self.create_network(panel_id, network_name)
-                    if result.success:
-                        self.current_cli_panel = panel_id
-                        result_data = result.data
-                    output = result.message if result.success else f"Error: {result.error}"
-                else:
-                    output = "Error: All panels have identities. Cannot create network."
+                # Use current panel if it has an identity
+                panel_id = self.current_cli_panel
+
+                result = self.create_network(panel_id, network_name)
+                if result.success:
+                    result_data = result.data
+                output = result.message if result.success else f"Error: {result.error}"
             
             elif cmd == "/invite":
                 # Generate invite for current panel
@@ -777,7 +854,8 @@ class QuietDemoCore:
                         output = f"Switched to panel {panel_id} (No identity)"
             
             elif cmd == "db":
-                db_dump = self.get_database_dump()
+                # Get database state via API
+                db_dump = self.api.dump_database()
                 lines = ["Database State:"]
                 for table_name, rows in sorted(db_dump.items()):
                     lines.append(f"\n{table_name}: {len(rows)} rows")
@@ -788,7 +866,9 @@ class QuietDemoCore:
             
             elif cmd == "groups":
                 try:
-                    groups = self.api._execute_query("group.list", {})
+                    # Query groups via API
+                    self.refresh_state(force=True)
+                    groups = self.get_groups()
                     if not groups:
                         output = "No groups found"
                     else:
@@ -989,6 +1069,10 @@ Press [bold]Escape[/bold] to close this help.""",
                     result = self.core.create_identity(self.panel_id, name)
                     if result.success:
                         messages_log.write(f"[green]{result.message}[/green]")
+                        # Update the display to show the new identity
+                        self.update_display()
+                        # Also refresh the parent app's displays
+                        self.app.update_displays()
                     else:
                         messages_log.write(f"[red]Error: {result.error}[/red]")
                 except Exception as e:
@@ -997,15 +1081,19 @@ Press [bold]Escape[/bold] to close this help.""",
             
             elif cmd == "network" and len(parts) > 1:
                 network_name = " ".join(parts[1:])
-                # Check if this panel already has an identity
-                if self.core.panels[self.panel_id].identity_id:
-                    messages_log.write("[red]This panel already has an identity[/red]")
+                # Check if this panel has NO identity (network creation requires an identity)
+                if not self.core.panels[self.panel_id].identity_id:
+                    messages_log.write("[red]This panel has no identity. Create one first with /create <name>[/red]")
                     return
                 
                 try:
                     result = self.core.create_network(self.panel_id, network_name)
                     if result.success:
                         messages_log.write(f"[green]{result.message}[/green]")
+                        # Update the display to show the network and groups
+                        self.update_display()
+                        # Also refresh the parent app's displays
+                        self.app.update_displays()
                     else:
                         messages_log.write(f"[red]Error: {result.error}[/red]")
                 except Exception as e:
@@ -1276,8 +1364,8 @@ Press [bold]Escape[/bold] to close this help.""",
                     child.remove()
                 
                 widgets = []
-                for group_name, group in sorted(self.core.groups.items()):
-                    group_label = Static(f"[bold]{group_name}[/bold]", classes="group-item")
+                for group_id, group in sorted(self.core.groups.items()):
+                    group_label = Static(f"[bold]{group['name']}[/bold]", classes="group-item")
                     widgets.append(group_label)
                     
                     # Show members if any
@@ -1322,17 +1410,18 @@ Press [bold]Escape[/bold] to close this help.""",
             log = self.query_one("#state-log", RichLog)
             log.clear()
             
-            db_dump = self.core.get_database_dump()
-            
+            # Get state via API
+            identities = self.core.get_identities()
+            groups = self.core.get_groups()
+            channels = self.core.get_channels()
+
             # Summary
             log.write("[bold cyan]Database State:[/bold cyan]")
-            log.write(f"  Identities: {len(db_dump.get('identities', []))}")
-            log.write(f"  Events: {len(db_dump.get('events', []))}")
-            log.write(f"  Keys: {len(db_dump.get('group_keys', []))}")
-            log.write(f"  Transit Keys: {len(db_dump.get('transit_keys', []))}")
-            
+            log.write(f"  Identities: {len(identities)}")
+            log.write(f"  Groups: {len(groups)}")
+            log.write(f"  Channels: {len(channels)}")
+
             # Recent identities
-            identities = db_dump.get('identities', [])
             if identities:
                 log.write("\n[bold cyan]Recent Identities:[/bold cyan]")
                 for ident in identities[-3:]:

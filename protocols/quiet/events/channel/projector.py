@@ -10,7 +10,8 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
     Returns deltas to apply.
     """
     event_data = envelope.get('event_plaintext', {})
-    channel_id = event_data['channel_id']
+    # Channel ID is the event_id for channel events
+    channel_id = envelope['event_id']
     group_id = event_data['group_id']
     network_id = event_data['network_id']
     name = event_data['name']

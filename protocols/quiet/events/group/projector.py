@@ -11,7 +11,8 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
     Returns deltas to apply.
     """
     event_data = envelope.get('event_plaintext', {})
-    group_id = event_data['group_id']
+    # Group ID is the event_id for group events
+    group_id = envelope['event_id']
     network_id = event_data['network_id']
     name = event_data['name']
     creator_id = event_data['creator_id']

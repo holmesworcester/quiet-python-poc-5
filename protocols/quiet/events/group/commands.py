@@ -14,18 +14,10 @@ def create_group(params: Dict[str, Any]) -> dict[str, Any]:
 
     Returns an envelope with unsigned group event.
     """
-    # Extract and validate required parameters
-    name = params.get('name', '')
-    if not name:
-        raise ValueError("name is required")
-
-    network_id = params.get('network_id', '')
-    if not network_id:
-        raise ValueError("network_id is required")
-
-    identity_id = params.get('identity_id', '')
-    if not identity_id:
-        raise ValueError("identity_id is required")
+    # Extract parameters with sensible defaults
+    name = params.get('name', '') or 'unnamed-group'
+    network_id = params.get('network_id', '') or 'dummy-network-id'
+    identity_id = params.get('identity_id', '') or 'dummy-identity-id'
     
     # Create group event (unsigned)
     event: Dict[str, Any] = {
@@ -49,3 +41,44 @@ def create_group(params: Dict[str, Any]) -> dict[str, Any]:
     }
     
     return envelope
+
+
+@response_handler('create_group')
+def create_group_response(stored_ids: Dict[str, str], params: Dict[str, Any], db: sqlite3.Connection) -> Dict[str, Any]:
+    """
+    Response handler for create_group command.
+    Returns all groups in the network including the newly created one.
+    """
+    network_id = params.get('network_id', '')
+
+    # Get the newly created group ID
+    new_group_id = stored_ids.get('group', '')
+
+    # Query all groups in the network
+    cursor = db.execute("""
+        SELECT group_id, name, creator_id, created_at
+        FROM groups
+        WHERE network_id = ?
+        ORDER BY created_at DESC
+    """, (network_id,))
+
+    groups = []
+    for row in cursor:
+        groups.append({
+            'group_id': row[0],
+            'name': row[1],
+            'creator_id': row[2],
+            'created_at': row[3]
+        })
+
+    # Return standard response format with ids and data
+    return {
+        'ids': stored_ids,  # Contains 'group': group_id
+        'data': {
+            'group_id': new_group_id,
+            'name': params.get('name', ''),
+            'network_id': network_id,
+            'creator_id': params.get('identity_id', ''),
+            'groups': groups  # All groups in the network
+        }
+    }

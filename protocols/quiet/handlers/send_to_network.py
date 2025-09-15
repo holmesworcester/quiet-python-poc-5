@@ -7,7 +7,7 @@ accepts OutgoingTransitEnvelope which contains exactly what goes on the wire.
 
 # Removed core.types import
 from protocols.quiet.protocol_types import OutgoingTransitEnvelope
-from typing import Any, List, Callable
+from typing import Any, List, Callable, cast
 import sqlite3
 from core.handlers import Handler
 
@@ -80,8 +80,19 @@ class SendToNetworkHandler(Handler):
         return filter_func(envelope)
 
     def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
-        """Process the envelope."""
-        result = handler(envelope)
-        if result:
-            return [result]
+        """
+        Terminal handler - sends to network and returns nothing.
+        Note: In a real implementation, this would need access to a network send function.
+        For now, we just log and return empty list.
+        """
+        # Type check - in production this would be enforced by the type system
+        required_fields = {'transit_ciphertext', 'transit_key_id', 'dest_ip', 'dest_port'}
+        if not all(field in envelope for field in required_fields):
+            print(f"[send_to_network] ERROR: Missing required fields. Got: {envelope.keys()}")
+            return []
+
+        # Log what we would send
+        print(f"[send_to_network] Would send to {envelope['dest_ip']}:{envelope['dest_port']}")
+
+        # Terminal handler - no new envelopes
         return []

@@ -50,8 +50,12 @@ class HandlerRegistry:
         Pass envelope through all matching handlers.
         Returns all new envelopes emitted by handlers.
         """
+        if not isinstance(envelope, dict):
+            print(f"[registry] ERROR: process_envelope got {type(envelope)} instead of dict")
+            return []
+
         all_emitted: List[dict[str, Any]] = []
-        
+
         for handler in self._handlers:
             if handler.filter(envelope):
                 print(f"[{handler.name}] Processing: {envelope}")
@@ -59,7 +63,7 @@ class HandlerRegistry:
                 if emitted:
                     print(f"[{handler.name}] Emitted {len(emitted)} envelopes")
                     all_emitted.extend(emitted)
-        
+
         return all_emitted
     
     def get_handler(self, name: str) -> Optional[Handler]:
