@@ -21,8 +21,8 @@ def validate(envelope: Dict[str, Any]) -> bool:
     if event_data.get('type') != 'sync_request':
         return False
 
-    # Check required fields
-    required_fields = ['type', 'request_id', 'network_id', 'peer_id', 'timestamp_ms']
+    # Check required fields for sync request
+    required_fields = ['request_id', 'network_id', 'from_identity', 'to_peer', 'timestamp_ms']
     for field in required_fields:
         if field not in event_data:
             return False
@@ -34,7 +34,10 @@ def validate(envelope: Dict[str, Any]) -> bool:
     if not event_data['network_id']:
         return False
 
-    if not event_data['peer_id']:
+    if not event_data['from_identity']:
+        return False
+
+    if not event_data['to_peer']:
         return False
 
     # Validate timestamp is reasonable

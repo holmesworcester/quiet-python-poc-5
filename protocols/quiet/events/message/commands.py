@@ -83,10 +83,13 @@ def create_message_response(stored_ids: Dict[str, str], params: Dict[str, Any], 
     # Reverse to get chronological order (oldest first)
     messages.reverse()
 
-    # Return response matching OpenAPI spec for create_message
+    # Return standard response format with ids and data
     return {
-        'message_id': new_message_id,
-        'channel_id': channel_id,
-        'content': params.get('content', ''),
-        'messages': messages  # Recent messages in the channel
+        'ids': stored_ids,  # Contains 'message': message_id
+        'data': {
+            'message_id': new_message_id,
+            'channel_id': channel_id,
+            'content': params.get('content', ''),
+            'messages': messages  # Recent messages in the channel
+        }
     }

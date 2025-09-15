@@ -37,15 +37,35 @@ def create_network(params: Dict[str, Any]) -> List[dict[str, Any]]:
             'signature': ''  # Will be filled by sign handler
         }
 
-        # Return only network event envelope when using existing identity
-        return [{
-            'event_plaintext': network_event,
-            'event_type': 'network',
-            'self_created': True,
-            'peer_id': creator_id,
-            'network_id': '',  # Will be filled by encrypt handler
-            'deps': []  # Network creation doesn't depend on other events
-        }]
+        # Create user event for the creator
+        user_event: Dict[str, Any] = {
+            'type': 'user',
+            'user_id': creator_id,
+            'network_id': '',  # Will be filled when network is created
+            'username': params.get('username', 'Creator'),
+            'created_at': created_at,
+            'signature': ''  # Will be filled by sign handler
+        }
+
+        # Return network and user event envelopes
+        return [
+            {
+                'event_plaintext': network_event,
+                'event_type': 'network',
+                'self_created': True,
+                'peer_id': creator_id,
+                'network_id': '',  # Will be filled by encrypt handler
+                'deps': []  # Network creation doesn't depend on other events
+            },
+            {
+                'event_plaintext': user_event,
+                'event_type': 'user',
+                'self_created': True,
+                'peer_id': creator_id,
+                'network_id': '',  # Will be filled when network is created
+                'deps': ['network:']  # User depends on network existing
+            }
+        ]
     else:
         # Create new identity (backwards compatibility)
         creator_name = params.get('creator_name', 'Network Creator')

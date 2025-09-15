@@ -1,6 +1,188 @@
 # Sync Request Design
 
-## Revised: Jobs Call Handlers Directly
+## Option 3: Reflector Pattern (Recommended)
+
+### Core Concept
+**Reflectors** are functions that take an event + query function and return envelopes directly. This unifies both event-triggered responses and scheduled jobs.
+
+```python
+# protocols/quiet/events/sync/reflectors.py
+def reflect_sync_request(event: Dict, query_fn: Callable) -> List[Dict]:
+    """
+    Reflect sync request: query database, generate response envelopes.
+    No commands needed - directly creates envelopes.
+    """
+    if event.get('is_outgoing'):
+        return []
+
+    # Query events to sync
+    events = query_fn('get_events_for_sync', {
+        'network_id': event['network_id'],
+        'limit': 100
+    })
+
+    # Generate response envelopes directly
+    responses = []
+    for e in events:
+        responses.append({
+            'event_type': 'sync_response',
+            'event_plaintext': {
+                'event_data': e,
+                'in_response_to': event['request_id']
+            },
+            'seal_to': event['peer_id'],
+            'is_outgoing': True
+        })
+
+    return responses
+```
+
+### Jobs as Reflectors
+```python
+# protocols/quiet/jobs/sync.py
+def sync_job(query_fn: Callable, params: Dict) -> List[Dict]:
+    """
+    Job is just a reflector without an input event.
+    Query peers, generate sync requests.
+    """
+    peers = query_fn('get_active_peers', {'network_id': params['network_id']})
+
+    envelopes = []
+    for peer in peers:
+        envelopes.append({
+            'event_type': 'sync_request',
+            'event_plaintext': {
+                'request_id': str(uuid.uuid4()),
+                'network_id': params['network_id'],
+                'timestamp_ms': int(time.time() * 1000)
+            },
+            'seal_to': peer['peer_id'],
+            'is_outgoing': True
+        })
+
+    return envelopes
+```
+
+### Reflector Handler
+```python
+# protocols/quiet/handlers/reflect.py
+class ReflectHandler(Handler):
+    """Runs reflectors for events that trigger responses."""
+
+    def __init__(self):
+        self.reflectors = self._load_reflectors()
+
+    def _load_reflectors(self):
+        # Auto-discover from events/*/reflectors.py
+        reflectors = {}
+        for event_type in ['sync', 'message', 'group']:
+            module = import_module(f'protocols.quiet.events.{event_type}.reflectors')
+            if hasattr(module, f'reflect_{event_type}_request'):
+                reflectors[f'{event_type}_request'] = getattr(module, f'reflect_{event_type}_request')
+        return reflectors
+
+    def filter(self, envelope: Dict) -> bool:
+        return (envelope.get('event_type') in self.reflectors and
+                envelope.get('event_plaintext'))
+
+    def process(self, envelope: Dict, db: sqlite3.Connection) -> List[Dict]:
+        event_type = envelope['event_type']
+        reflector = self.reflectors[event_type]
+
+        # Create query function with read-only access
+        def query_fn(query_name: str, params: Dict):
+            return run_query(db, query_name, params)
+
+        # Run reflector to get new envelopes
+        return reflector(envelope['event_plaintext'], query_fn)
+```
+
+### Unified Job/Scheduler System
+```python
+# core/scheduler.py
+def run_job(job_name: str, db: Connection) -> List[Dict]:
+    """Run a job function with query access."""
+    job_fn = load_job_function(job_name)
+
+    def query_fn(query_name: str, params: Dict):
+        return run_query(db, query_name, params)
+
+    return job_fn(query_fn, job_params)
+```
+
+### Key Benefits
+1. **Unified Pattern**: Both reflectors and jobs follow `(query_fn, ...) -> envelopes`
+2. **Self-Contained**: Each reflector/job is a complete unit
+3. **No Command Coupling**: Direct envelope generation without commands
+4. **Consistent Architecture**: Similar to validators/projectors pattern
+5. **Query-Only Access**: Functions get read-only database access via query_fn
+
+### File Structure
+```
+protocols/quiet/events/sync/
+    reflectors.py   # reflect_sync_request()
+    queries.py      # get_events_for_sync(), get_active_peers()
+
+protocols/quiet/jobs/
+    sync.py         # sync_job(query_fn, params)
+    ttl.py          # ttl_cleanup_job(query_fn, params)
+    rekey.py        # rekey_job(query_fn, params)
+```
+
+This makes the architecture super consistent:
+- **Commands**: Create envelopes from user input
+- **Validators**: Check envelope validity
+- **Projectors**: Update database state
+- **Reflectors**: Generate response envelopes from events
+- **Jobs**: Generate scheduled envelopes (reflectors without event trigger)
+
+## Option 2: Hybrid Event-Type + Handler Approach
+
+### Sync as Event-Type with Command
+```python
+# protocols/quiet/events/sync/commands.py
+def sync_request(network_id: str, peers: List[Dict]) -> List[Dict]:
+    """Create sync request envelopes. Peers passed as params to keep pure."""
+    envelopes = []
+    for peer in peers:
+        envelopes.append({
+            'event_type': 'sync_request',
+            'event_plaintext': {
+                'request_id': str(uuid.uuid4()),
+                'network_id': network_id,
+                'timestamp_ms': int(time.time() * 1000)
+            },
+            'seal_to': peer['peer_id'],
+            'is_outgoing': True
+        })
+    return envelopes
+```
+
+### Handler for Processing Requests
+```python
+# protocols/quiet/handlers/sync.py
+class SyncHandler(Handler):
+    """Processes incoming sync requests, generates responses."""
+
+    def filter(self, envelope: Dict) -> bool:
+        return (envelope.get('event_type') == 'sync_request' and
+                not envelope.get('is_outgoing'))
+
+    def process(self, envelope: Dict, db: Connection) -> List[Dict]:
+        # Query and generate response envelopes
+        # (handler appropriately handles side effects)
+```
+
+### Job Calls Command
+```python
+# core/jobs.py
+def sync_job(db: Connection, params: Dict) -> List[Dict]:
+    """Query peers, call sync_request command."""
+    peers = query_active_peers(db, params['network_id'])
+    return sync_request(params['network_id'], peers)
+```
+
+## Option 1: Jobs Call Handlers Directly (Current Implementation)
 
 ```python
 # core/scheduler.py

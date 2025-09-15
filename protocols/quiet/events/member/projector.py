@@ -1,12 +1,12 @@
 """
-Projector for add events.
+Projector for member events.
 """
 from typing import Dict, Any, List
 
 
 def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Project an add event into the group_members table.
+    Project a member event into the group_members table.
     
     Returns a list of deltas.
     """

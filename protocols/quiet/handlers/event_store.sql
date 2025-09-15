@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS events (
     group_id TEXT,
     
     -- Network metadata
+    network_id TEXT,
     received_at INTEGER,
     origin_ip TEXT,
     origin_port INTEGER,
@@ -28,6 +29,9 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 
 -- Index for querying events by key_id
 CREATE INDEX IF NOT EXISTS idx_events_key ON events(event_key_id);
+
+-- Index for querying events by network
+CREATE INDEX IF NOT EXISTS idx_events_network ON events(network_id);
 
 -- Index for purged events and TTL cleanup
 CREATE INDEX IF NOT EXISTS idx_events_purged ON events(purged, ttl_expire_at);

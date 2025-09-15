@@ -59,15 +59,19 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - ids
+                  - data
                 properties:
-                  network_id:
-                    type: string
-                  name:
-                    type: string
-                  creator_id:
-                    type: string
-                  created_at:
-                    type: integer
+                  ids:
+                    type: object
+                    properties:
+                      network:
+                        type: string
+                        description: The ID of the created network
+                  data:
+                    type: object
+                    description: Additional response data
 
     get:
       summary: List all networks
@@ -120,14 +124,19 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - ids
+                  - data
                 properties:
-                  identity_id:
-                    type: string
-                    description: Public key of the identity
-                  network_id:
-                    type: string
-                  created_at:
-                    type: integer
+                  ids:
+                    type: object
+                    properties:
+                      identity:
+                        type: string
+                        description: The ID of the created identity
+                  data:
+                    type: object
+                    description: Additional response data
 
     get:
       summary: List all identities
@@ -296,15 +305,32 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - ids
+                  - data
                 properties:
-                  group_id:
-                    type: string
-                  name:
-                    type: string
-                  network_id:
-                    type: string
-                  creator_id:
-                    type: string
+                  ids:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                        description: The ID of the created group
+                  data:
+                    type: object
+                    properties:
+                      group_id:
+                        type: string
+                      name:
+                        type: string
+                      network_id:
+                        type: string
+                      creator_id:
+                        type: string
+                      groups:
+                        type: array
+                        description: All groups in the network
+                        items:
+                          type: object
 
     get:
       summary: List groups in a network
@@ -372,13 +398,30 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - ids
+                  - data
                 properties:
-                  channel_id:
-                    type: string
-                  name:
-                    type: string
-                  group_id:
-                    type: string
+                  ids:
+                    type: object
+                    properties:
+                      channel:
+                        type: string
+                        description: The ID of the created channel
+                  data:
+                    type: object
+                    properties:
+                      channel_id:
+                        type: string
+                      name:
+                        type: string
+                      group_id:
+                        type: string
+                      channels:
+                        type: array
+                        description: All channels in the group
+                        items:
+                          type: object
 
     get:
       summary: List channels in a group
@@ -444,13 +487,30 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - ids
+                  - data
                 properties:
-                  message_id:
-                    type: string
-                  channel_id:
-                    type: string
-                  content:
-                    type: string
+                  ids:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        description: The ID of the created message
+                  data:
+                    type: object
+                    properties:
+                      message_id:
+                        type: string
+                      channel_id:
+                        type: string
+                      content:
+                        type: string
+                      messages:
+                        type: array
+                        description: Recent messages in the channel
+                        items:
+                          type: object
 
     get:
       summary: List messages in a channel
@@ -525,13 +585,24 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - ids
+                  - data
                 properties:
-                  invite_code:
-                    type: string
-                  network_id:
-                    type: string
-                  expires_at:
-                    type: integer
+                  ids:
+                    type: object
+                    properties:
+                      invite:
+                        type: string
+                        description: The ID of the created invite
+                  data:
+                    type: object
+                    properties:
+                      invite_link:
+                        type: string
+                        description: The shareable invite link
+                      invite_id:
+                        type: string
 
   # =========================================================================================
   # GROUP MEMBERSHIP
@@ -539,8 +610,8 @@ paths:
   
   /groups/members:
     post:
-      summary: Add a user to a group
-      operationId: create_add
+      summary: Create a group member
+      operationId: create_member
       requestBody:
         required: true
         content:
@@ -557,15 +628,15 @@ paths:
                   type: string
                 user_id:
                   type: string
-                  description: User to add to the group
+                  description: User ID for the member
                 identity_id:
                   type: string
-                  description: Identity performing the add
+                  description: Identity creating the member
                 network_id:
                   type: string
       responses:
         '200':
-          description: User added to group successfully
+          description: Member created successfully
           content:
             application/json:
               schema:
@@ -613,6 +684,9 @@ paths:
                     type: string
                   group_id:
                     type: string
+                group_id:
+                  type: string
+                  description: Group to add the invite to
                   created_at:
                     type: integer
 

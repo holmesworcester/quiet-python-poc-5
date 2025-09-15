@@ -34,9 +34,7 @@ def init_database(conn: sqlite3.Connection, protocol_dir: Optional[str] = None) 
     3. Any top-level .schema.sql files in the protocol directory
     """
 
-    # Initialize core tables (job_runs for job scheduling)
-    from core.jobs import init_job_tables
-    init_job_tables(conn)
+    # Core tables are now initialized by protocol handlers if needed
 
     if protocol_dir:
         import glob

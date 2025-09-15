@@ -1,5 +1,5 @@
 """
-Commands for add event type.
+Commands for member event type.
 """
 import time
 import sqlite3
@@ -8,11 +8,11 @@ from core.core_types import command, response_handler
 
 
 @command
-def create_add(params: Dict[str, Any]) -> dict[str, Any]:
+def create_member(params: Dict[str, Any]) -> dict[str, Any]:
     """
-    Add a user to a group.
-    
-    Returns an envelope with unsigned add event.
+    Create a group member.
+
+    Returns an envelope with unsigned member event.
     """
     # Extract and validate parameters
     group_id = params.get('group_id', '')
@@ -31,9 +31,9 @@ def create_add(params: Dict[str, Any]) -> dict[str, Any]:
     if not network_id:
         raise ValueError("network_id is required")
     
-    # Create add event (unsigned)
+    # Create member event (unsigned)
     event: Dict[str, Any] = {
-        'type': 'add',
+        'type': 'member',
         'group_id': group_id,
         'user_id': user_id,
         'added_by': identity_id,
@@ -45,7 +45,7 @@ def create_add(params: Dict[str, Any]) -> dict[str, Any]:
     # Create envelope
     envelope: dict[str, Any] = {
         'event_plaintext': event,
-        'event_type': 'add',
+        'event_type': 'member',
         'self_created': True,
         'peer_id': identity_id,
         'network_id': network_id,
@@ -55,10 +55,10 @@ def create_add(params: Dict[str, Any]) -> dict[str, Any]:
     return envelope
 
 
-@response_handler('create_add')
-def create_add_response(stored_ids: Dict[str, str], params: Dict[str, Any], db: sqlite3.Connection) -> Dict[str, Any]:
+@response_handler('create_member')
+def create_member_response(stored_ids: Dict[str, str], params: Dict[str, Any], db: sqlite3.Connection) -> Dict[str, Any]:
     """
-    Response handler for create_add command.
+    Response handler for create_member command.
     Returns all group members including the newly added one.
     """
     group_id = params.get('group_id', '')
@@ -83,7 +83,7 @@ def create_add_response(stored_ids: Dict[str, str], params: Dict[str, Any], db: 
 
     # Return response matching OpenAPI spec
     return {
-        'added': 'add' in stored_ids,
+        'added': 'member' in stored_ids,
         'group_id': group_id,
         'members': members,
         'member_count': len(members)

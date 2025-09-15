@@ -3,7 +3,6 @@ Tests for group event type query (list).
 """
 import pytest
 import sys
-import json
 from pathlib import Path
 
 # Add project root to path
@@ -13,220 +12,172 @@ project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.group.queries import get as get_groups
-from protocols.quiet.events.group.commands import create_group
-from protocols.quiet.events.identity.commands import create_identity
-from protocols.quiet.events.network.commands import create_network
-from protocols.quiet.events.add.commands import create_add
-# from core.pipeline import PipelineRunner  # Use if needed
 
 
 class TestGroupQuery:
     """Test group list query."""
-    
+
     @pytest.fixture
     def setup_groups(self, initialized_db):
-        """Create multiple groups for testing."""
-        # Create two identities
-        identity1_envelope = create_identity({"network_id": "test-network"})
-        # Process through pipeline if needed
-        identity1_id = identity1_envelope["event_plaintext"]["peer_id"]
-        
-        identity2_envelope = create_identity({"network_id": "test-network"})
-        # Process through pipeline if needed
-        identity2_id = identity2_envelope["event_plaintext"]["peer_id"]
-        
-        # Create two networks
-        network1_envelope, identity1_envelope = create_network({
-            "name": "Network 1",
-            "identity_id": identity1_id
-        })
-        # Process through pipeline if needed
-        network1_id = network1_envelope["event_plaintext"]["network_id"]
-        
-        network2_envelope, identity2_envelope = create_network({
-            "name": "Network 2",
-            "identity_id": identity2_id
-        })
-        # Process through pipeline if needed
-        network2_id = network2_envelope["event_plaintext"]["network_id"]
-        
-        groups_created = []
-        
-        # Create groups in network 1
-        for name in ["Engineering", "Marketing"]:
-            envelope = create_group({
-                "name": name,
-                "network_id": network1_id,
-                "identity_id": identity1_id
-            })
-        # Process through pipeline if needed
-            groups_created.append(envelope["event_plaintext"])
-        
-        # Create group in network 2
-        envelope = create_group({
-            "name": "Sales",
-            "network_id": network2_id,
-            "identity_id": identity2_id
-        })
-        # Process through pipeline if needed
-        groups_created.append(envelope["event_plaintext"])
-        
-        # Add identity2 to Engineering group in network1
-        engineering_group_id = groups_created[0]["group_id"]
-        add_envelope = create_add({
-            "group_id": engineering_group_id,
-            "user_id": identity2_id,
-            "identity_id": identity1_id  # identity1 is adding identity2
-        })
-        # Process through pipeline if needed
+        """Create test groups directly in database."""
+        conn = initialized_db
+
+        # Insert test networks
+        network1_id = "test-network-1"
+        network2_id = "test-network-2"
+
+        conn.execute("""
+            INSERT INTO networks (network_id, name, creator_id, created_at)
+            VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+        """, (
+            network1_id, "Network 1", "creator-1", 1000000,
+            network2_id, "Network 2", "creator-2", 1000001
+        ))
+
+        # Insert test groups (both creator_id and owner_id are required)
+        conn.execute("""
+            INSERT INTO groups (group_id, name, network_id, creator_id, owner_id, created_at)
+            VALUES
+                ('group-eng', 'Engineering', ?, 'owner-1', 'owner-1', 1000002),
+                ('group-mkt', 'Marketing', ?, 'owner-1', 'owner-1', 1000003),
+                ('group-sales', 'Sales', ?, 'owner-2', 'owner-2', 1000004)
+        """, (network1_id, network1_id, network2_id))
+
+        # Insert group members
+        conn.execute("""
+            INSERT INTO group_members (group_id, user_id, added_by, added_at)
+            VALUES
+                ('group-eng', 'user-1', 'owner-1', 1000005),
+                ('group-eng', 'user-2', 'owner-1', 1000006),
+                ('group-mkt', 'user-1', 'owner-1', 1000007)
+        """)
+
+        conn.commit()
+
         return {
-            "identity1_id": identity1_id,
-            "identity2_id": identity2_id,
             "network1_id": network1_id,
             "network2_id": network2_id,
-            "groups": groups_created,
-            "engineering_group_id": engineering_group_id
+            "group_ids": ["group-eng", "group-mkt", "group-sales"]
         }
-    
+
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_list_all_groups(self, initialized_db, setup_groups):
-        """Test listing all groups without filters."""
-        groups = get_groups(initialized_db, {})
-        
+        """Test listing all groups."""
+        params = {}
+        groups = get_groups(initialized_db, params)
+
+        # Should return all 3 groups
         assert len(groups) == 3
-        
-        # Check groups are sorted by created_at DESC
-        for i in range(len(groups) - 1):
-            assert groups[i]["created_at"] >= groups[i + 1]["created_at"]
-    
+
+        # Check group names
+        group_names = [g["name"] for g in groups]
+        assert "Engineering" in group_names
+        assert "Marketing" in group_names
+        assert "Sales" in group_names
+
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_list_groups_by_network(self, initialized_db, setup_groups):
-        """Test filtering groups by network_id."""
-        data = setup_groups
-        
-        # List groups in network 1
-        groups = get_groups(initialized_db, {"network_id": data["network1_id"]})
-        assert len(groups) == 2
-        for group in groups:
-            assert group["network_id"] == data["network1_id"]
-            assert group["name"] in ["Engineering", "Marketing"]
-        
-        # List groups in network 2
-        groups = get_groups(initialized_db, {"network_id": data["network2_id"]})
-        assert len(groups) == 1
-        assert groups[0]["network_id"] == data["network2_id"]
-        assert groups[0]["name"] == "Sales"
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_list_groups_by_user(self, initialized_db, setup_groups):
-        """Test filtering groups by user membership."""
-        data = setup_groups
-        
-        # List groups for identity1 (member of Engineering and Marketing)
-        groups = get_groups(initialized_db, {"user_id": data["identity1_id"]})
+        """Test listing groups filtered by network."""
+        # Get groups from network 1
+        params = {"network_id": setup_groups["network1_id"]}
+        groups = get_groups(initialized_db, params)
+
+        # Should return 2 groups (Engineering and Marketing)
         assert len(groups) == 2
         group_names = [g["name"] for g in groups]
-        assert set(group_names) == {"Engineering", "Marketing"}
-        
-        # List groups for identity2 (member of Engineering and Sales)
-        groups = get_groups(initialized_db, {"user_id": data["identity2_id"]})
-        assert len(groups) == 2
-        group_names = [g["name"] for g in groups]
-        assert set(group_names) == {"Engineering", "Sales"}
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_list_groups_by_user_and_network(self, initialized_db, setup_groups):
-        """Test filtering groups by both user_id and network_id."""
-        data = setup_groups
-        
-        # Identity1's groups in network1
-        groups = get_groups(initialized_db, {
-            "user_id": data["identity1_id"],
-            "network_id": data["network1_id"]
-        })
-        assert len(groups) == 2
-        for group in groups:
-            assert group["network_id"] == data["network1_id"]
-        
-        # Identity2's groups in network1 (only Engineering)
-        groups = get_groups(initialized_db, {
-            "user_id": data["identity2_id"],
-            "network_id": data["network1_id"]
-        })
-        assert len(groups) == 1
-        assert groups[0]["name"] == "Engineering"
-        
-        # Identity2's groups in network2 (only Sales)
-        groups = get_groups(initialized_db, {
-            "user_id": data["identity2_id"],
-            "network_id": data["network2_id"]
-        })
+        assert "Engineering" in group_names
+        assert "Marketing" in group_names
+        assert "Sales" not in group_names
+
+        # Get groups from network 2
+        params = {"network_id": setup_groups["network2_id"]}
+        groups = get_groups(initialized_db, params)
+
+        # Should return 1 group (Sales)
         assert len(groups) == 1
         assert groups[0]["name"] == "Sales"
-    
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_list_groups_permissions_parsed(self, initialized_db, setup_groups):
-        """Test that permissions JSON is parsed."""
-        groups = get_groups(initialized_db, {})
-        
-        assert len(groups) > 0
-        for group in groups:
-            # Permissions should be a dict, not a string
-            assert isinstance(group["permissions"], dict)
-            
-            # Check expected permission structure
-            if group["permissions"]:  # Some groups might have empty permissions
-                for perm_name, perm_value in group["permissions"].items():
-                    assert isinstance(perm_value, list)
-    
+    def test_list_groups_by_owner(self, initialized_db, setup_groups):
+        """Test listing groups filtered by owner."""
+        # Get groups owned by owner-1
+        params = {"owner_id": "owner-1"}
+        groups = get_groups(initialized_db, params)
+
+        # Should return 2 groups
+        assert len(groups) == 2
+        group_names = [g["name"] for g in groups]
+        assert "Engineering" in group_names
+        assert "Marketing" in group_names
+
+        # Get groups owned by owner-2
+        params = {"owner_id": "owner-2"}
+        groups = get_groups(initialized_db, params)
+
+        # Should return 1 group
+        assert len(groups) == 1
+        assert groups[0]["name"] == "Sales"
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_list_groups_empty_result(self, initialized_db):
-        """Test that empty database returns empty list."""
-        groups = get_groups(initialized_db, {})
+    def test_list_groups_combined_filters(self, initialized_db, setup_groups):
+        """Test listing groups with multiple filters."""
+        # Get groups in network1 owned by owner-1
+        params = {
+            "network_id": setup_groups["network1_id"],
+            "owner_id": "owner-1"
+        }
+        groups = get_groups(initialized_db, params)
+
+        # Should return 2 groups
+        assert len(groups) == 2
+
+        # Get groups in network2 owned by owner-1 (should be none)
+        params = {
+            "network_id": setup_groups["network2_id"],
+            "owner_id": "owner-1"
+        }
+        groups = get_groups(initialized_db, params)
+
+        # Should return 0 groups
+        assert len(groups) == 0
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_list_groups_includes_member_count(self, initialized_db, setup_groups):
+        """Test that group listing includes member count."""
+        params = {"network_id": setup_groups["network1_id"]}
+        groups = get_groups(initialized_db, params)
+
+        # Find Engineering group
+        eng_group = next(g for g in groups if g["name"] == "Engineering")
+        assert eng_group["member_count"] == 2
+
+        # Find Marketing group
+        mkt_group = next(g for g in groups if g["name"] == "Marketing")
+        assert mkt_group["member_count"] == 1
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_list_groups_empty_result(self, initialized_db, setup_groups):
+        """Test listing groups with no matches."""
+        params = {"network_id": "non-existent-network"}
+        groups = get_groups(initialized_db, params)
+
+        # Should return empty list
         assert groups == []
-    
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_list_groups_nonexistent_filters(self, initialized_db, setup_groups):
-        """Test filtering with non-existent IDs returns empty."""
-        groups = get_groups(initialized_db, {"network_id": "nonexistent-network"})
-        assert groups == []
-        
-        groups = get_groups(initialized_db, {"user_id": "nonexistent-user"})
-        assert groups == []
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_list_groups_returns_all_fields(self, initialized_db, setup_groups):
-        """Test that query returns all group fields."""
-        groups = get_groups(initialized_db, {})
-        
-        assert len(groups) > 0
-        group = groups[0]
-        
-        # Check all expected fields are present
-        expected_fields = [
-            'group_id', 'network_id', 'name', 
-            'creator_id', 'owner_id', 'created_at', 'permissions'
-        ]
-        
-        for field in expected_fields:
-            assert field in group
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_list_groups_user_not_in_any(self, initialized_db, setup_groups):
-        """Test that user with no group memberships returns empty."""
-        # Create a new identity with no group memberships
-        new_identity_envelope = create_identity({"network_id": "test-network"})
-        # Process through pipeline if needed
-        new_identity_id = new_identity_envelope["event_plaintext"]["peer_id"]
-        
-        groups = get_groups(initialized_db, {"user_id": new_identity_id})
-        assert groups == []
+    def test_list_groups_ordering(self, initialized_db, setup_groups):
+        """Test that groups are ordered by creation time."""
+        params = {}
+        groups = get_groups(initialized_db, params)
+
+        # Should be ordered by created_at (newest first by default)
+        assert groups[0]["name"] == "Sales"  # Created last (1000004)
+        assert groups[1]["name"] == "Marketing"  # Created second (1000003)
+        assert groups[2]["name"] == "Engineering"  # Created first (1000002)

@@ -278,12 +278,9 @@ class QuietDemoCore:
                     "online": True
                 }
 
-                # Add success message to panel
-                panel.messages.append({
-                    "type": "system",
-                    "text": f"Welcome {panel.identity_name}! Your identity has been created.",
-                    "timestamp": datetime.now()
-                })
+                # Don't add system messages to the message area
+                # Just log the event
+                pass
 
                 self._add_event('command', f"Panel {panel_id}: Created identity '{panel.identity_name}'")
                 return CommandResult(True,
@@ -388,11 +385,11 @@ class QuietDemoCore:
                                 if channel_result and "ids" in channel_result:
                                     channel_id = channel_result["ids"].get("channel")
                                     if channel_id:
-                                    # Set as current channel
-                                    panel.current_channel = channel_id
-                                    panel.current_group = group_id
-                                else:
-                                    print(f"Warning: No channel ID in result: {channel_result}")
+                                        # Set as current channel
+                                        panel.current_channel = channel_id
+                                        panel.current_group = group_id
+                                    else:
+                                        print(f"Warning: No channel ID in result: {channel_result}")
                                 else:
                                     print(f"Warning: Channel creation failed or no ids: {channel_result}")
                             except Exception as e:
@@ -401,12 +398,9 @@ class QuietDemoCore:
                     # Refresh state to load the new channels
                     self.refresh_state(force=True)
 
-                    # Add welcome message
-                    panel.messages.append({
-                        "type": "system",
-                        "text": f"Created network '{name}' with default #general channel",
-                        "timestamp": datetime.now()
-                    })
+                    # Don't add system messages to the message area
+                    # Network creation is already logged
+                    pass
 
                     self._add_event('command', f"Panel {panel_id}: Created network '{name}'")
                     return CommandResult(True, f"Created network: {name}", data={"network_id": network_id})
@@ -834,7 +828,12 @@ class QuietDemoCore:
                         lines.append(f"  ID: {panel.identity_id[:16]}...")
                         lines.append(f"  Network: {panel.network_id}")
                         if panel.current_channel:
-                            lines.append(f"  Channel: #{panel.current_channel}")
+                            # Get channel name from channels dict
+                            if panel.current_channel in self.channels:
+                                channel_name = self.channels[panel.current_channel].get('name', panel.current_channel)
+                                lines.append(f"  Channel: #{channel_name}")
+                            else:
+                                lines.append(f"  Channel: #{panel.current_channel}")
                         if panel_id == self.current_cli_panel:
                             lines.append("  [ACTIVE]")
                     else:

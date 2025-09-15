@@ -1,17 +1,17 @@
 """
-Validator for add events.
+Validator for member events.
 """
 from typing import Dict, Any
 
 
 def validate(event_data: Dict[str, Any], metadata: Dict[str, Any]) -> bool:
     """
-    Validate an add event.
+    Validate a member event.
     
     Returns True if valid, False if invalid.
     """
     # Check type
-    if event_data.get('type') != 'add':
+    if event_data.get('type') != 'member':
         return False
         
     # Check required fields

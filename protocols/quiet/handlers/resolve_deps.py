@@ -214,7 +214,7 @@ def are_all_deps_satisfied(event_id: str, db: sqlite3.Connection) -> bool:
         SELECT dep_id FROM blocked_event_deps WHERE event_id = ?
     """, (event_id,))
     
-    all_deps = [row['dep_id'] for row in cursor]
+    all_deps = [row[0] for row in cursor]  # dep_id is first column
     
     for dep_id in all_deps:
         # Check if this dependency exists and is not purged
@@ -255,12 +255,13 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
             return None
 
         # Reconstruct the identity event
+        # row columns: identity_id, network_id, name, public_key, private_key, created_at
         event_plaintext = {
             'type': 'identity',
-            'name': row['name'],
-            'network_id': row['network_id'],
-            'public_key': row['public_key'],
-            'created_at': row['created_at']
+            'name': row[2],  # name
+            'network_id': row[1],  # network_id
+            'public_key': row[3],  # public_key
+            'created_at': row[5]  # created_at
         }
 
         envelope = {
@@ -271,9 +272,9 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
         }
 
         # Include private key in local metadata
-        if row['private_key']:
+        if row[4]:  # private_key
             envelope['local_metadata'] = {
-                'private_key': row['private_key'] if isinstance(row['private_key'], str) else row['private_key'].hex()
+                'private_key': row[4] if isinstance(row[4], str) else row[4].hex()
             }
 
         return envelope
@@ -289,8 +290,8 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
         row = cursor.fetchone()
         if row:
             return {
-                'transit_secret': row['transit_secret'],
-                'network_id': row['network_id']
+                'transit_secret': row[0],  # transit_secret
+                'network_id': row[1]  # network_id
             }
         return None
         
@@ -303,13 +304,13 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
         """, (dep_id,))
         
         row = cursor.fetchone()
-        if row and row['unsealed_secret']:
+        if row and row[1]:  # unsealed_secret
             return {
                 'event_type': 'key',
                 'event_id': dep_id,
-                'key_id': row['key_id'],
-                'unsealed_secret': row['unsealed_secret'],
-                'group_id': row['group_id'],
+                'key_id': row[0],  # key_id
+                'unsealed_secret': row[1],  # unsealed_secret
+                'group_id': row[2],  # group_id
                 'validated': True
             }
         return None
@@ -327,7 +328,7 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
             # Return minimal envelope - the dependency exists
             return {
                 'event_plaintext': {},  # We don't store plaintext anymore
-                'event_type': row['event_type'],
+                'event_type': row[0],  # row is a tuple, event_type is first column
                 'event_id': dep_id,
                 'validated': True
             }
@@ -343,12 +344,13 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
 
             row = cursor.fetchone()
             if row:
+                # row columns: peer_id, public_key, identity_id, network_id, created_at
                 event_plaintext = {
                     'type': 'peer',
-                    'public_key': row['public_key'],
-                    'identity_id': row['identity_id'],
-                    'network_id': row['network_id'],
-                    'created_at': row['created_at']
+                    'public_key': row[1],  # public_key
+                    'identity_id': row[2],  # identity_id
+                    'network_id': row[3],  # network_id
+                    'created_at': row[4]  # created_at
                 }
                 return {
                     'event_plaintext': event_plaintext,

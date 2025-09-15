@@ -228,7 +228,7 @@ class PipelineRunner:
 
         queue = no_placeholder_queue
         iterations = 0
-        max_iterations = 1000  # Sanity check to prevent infinite loops
+        max_iterations = 100  # Strict limit to prevent infinite loops
 
         # Track total envelopes processed across all iterations for diagnostics
         total_envelopes_processed = 0
@@ -291,6 +291,16 @@ class PipelineRunner:
                 self.emitted_count += len(emitted)
 
             queue = next_queue
+
+        # Check if we hit the iteration limit
+        if queue and iterations >= max_iterations:
+            self.log(f"ERROR: Pipeline hit maximum iteration limit ({max_iterations})")
+            self.log(f"ERROR: {len(queue)} envelopes still in queue after {total_envelopes_processed} total processed")
+            self.log(f"ERROR: This indicates an infinite loop in the pipeline")
+            # Log first few envelopes for debugging
+            for i, env in enumerate(queue[:3]):
+                self.log(f"ERROR: Envelope {i}: type={env.get('event_type')}, id={env.get('event_id', 'unknown')}")
+            raise RuntimeError(f"Pipeline infinite loop detected: {iterations} iterations reached with {len(queue)} envelopes still in queue")
 
         # Now process events with placeholders
         if placeholder_queue:

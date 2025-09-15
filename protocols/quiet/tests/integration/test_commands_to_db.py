@@ -100,7 +100,7 @@ class TestCommandsToDatabase:
                                 result['key_id'] = event.get('key_id')
                             elif event_type == 'invite':
                                 result['invite_code'] = event.get('invite_code')
-                            elif event_type == 'add':
+                            elif event_type == 'member':
                                 result['added'] = True
                     
                     return {
@@ -242,6 +242,10 @@ class TestCommandsToDatabase:
         group_events = [e for e in events if e["event_type"] == "group"]
         assert len(group_events) == 1
         assert group_events[0]["network_id"] == network_id
+
+        # Check member events (creator is automatically added as member)
+        member_events = [e for e in events if e["event_type"] == "member"]
+        assert len(member_events) == 1
         
         # Check projections
         groups = db_state["groups"]["rows"]
@@ -513,8 +517,8 @@ class TestCommandsToDatabase:
         assert invites[0]["used_by"] == new_identity_id
     
     @pytest.mark.integration
-    def test_create_add_command(self, api_client, dump_database, db_conn):
-        """Test create_add command creates proper database state."""
+    def test_create_member_command(self, api_client, dump_database, db_conn):
+        """Test create_member command creates proper database state."""
         # Setup: create network with two users and a group
         network_response = api_client.execute_command("create_network", {
             "name": "Test Network"
@@ -547,7 +551,7 @@ class TestCommandsToDatabase:
         group_id = group_response["result"]["group_id"]
         
         # Add second user to group
-        response = api_client.execute_command("create_add", {
+        response = api_client.execute_command("create_member", {
             "group_id": group_id,
             "user_id": second_user_id,
             "identity_id": owner_id,
@@ -561,8 +565,8 @@ class TestCommandsToDatabase:
         
         # Check events
         events = db_state["events"]["rows"]
-        add_events = [e for e in events if e["event_type"] == "add"]
-        assert len(add_events) == 1
+        member_events = [e for e in events if e["event_type"] == "member"]
+        assert len(member_events) == 1
         
         # Check projections
         members = db_state["group_members"]["rows"]

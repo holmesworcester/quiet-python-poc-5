@@ -102,9 +102,9 @@ class UserEventData(TypedDict):
     created_at: int
     signature: str
 
-class AddEventData(TypedDict):
-    """Add event data structure (for group membership)"""
-    type: Literal["add"]
+class MemberEventData(TypedDict):
+    """Member event data structure (for group membership)"""
+    type: Literal["member"]
     add_id: str
     group_id: str
     network_id: str
@@ -124,7 +124,7 @@ EVENT_TYPE_REGISTRY: dict[str, Type[Any]] = {
     "message": MessageEventData,
     "invite": InviteEventData,
     "user": UserEventData,
-    "add": AddEventData,
+    "member": MemberEventData,
 }
 
 # Command parameter types using dataclasses for validation
@@ -188,8 +188,8 @@ class CreateUserParams:
     identity_id: str
 
 @dataclass
-class CreateAddParams:
-    """Parameters for adding a user to a group"""
+class CreateMemberParams:
+    """Parameters for creating a group member"""
     user_id: str
     group_id: str
     identity_id: str
@@ -205,7 +205,7 @@ COMMAND_PARAMS_REGISTRY: dict[str, Type] = {
     "message": CreateMessageParams,
     "invite": CreateInviteParams,
     "user": CreateUserParams,
-    "add": CreateAddParams,
+    "member": CreateMemberParams,
 }
 
 def validate_event_data(event_type: str, event_data: dict) -> bool:

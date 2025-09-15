@@ -48,6 +48,22 @@ I'm curious if the following design will be simpler:
    - Used by API endpoints and application logic to read projected state
 
 4. **Enforcement Mechanisms**
+
+### Jobs and Reflectors
+
+The system includes two patterns for background processing:
+
+**Jobs** - Scheduled tasks that run periodically and maintain state:
+- Signature: `(state: Dict, db: ReadOnlyConnection, time_now_ms: int) -> (success: bool, new_state: Dict, envelopes: List[Dict])`
+- Examples: `sync_request_job` sends periodic sync requests to peers
+- Triggered by `run_job` envelopes from the scheduler
+
+**Reflectors** - Event-triggered functions that respond to specific events:
+- Signature: `(envelope: Dict, db: ReadOnlyConnection, time_now_ms: int) -> (success: bool, envelopes: List[Dict])`
+- Examples: `sync_response_reflector` responds to incoming sync requests with events
+- Triggered by specific event types they subscribe to
+
+Both patterns query the database and emit envelopes, but jobs maintain state between runs while reflectors are stateless.
    - `@command`, `@validator`, `@projector` decorators check source code for DB access
    - `ReadOnlyConnection` wrapper prevents write operations in queries
    - Runtime errors if event functions attempt database access

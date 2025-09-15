@@ -50,3 +50,8 @@ having commands use a pipeline instead of generating right off the bat is challe
 - some commands can only be tested well with scenario tests if we want to run them through the whole pipeline because we need to make tests earlier. 
 
 decisions: we keep protocol/quiet/jobs.yaml. we don't have protocol/quiet/jobs and we extend commands to be able to do a query first and then operate on the query. then we make queries that the sync-request job and the sync-request event projector can use. this is also a bit weird. we'll have to modify projectors to be able to emit envelopes other than deltas (outgoing ones.)  
+
+better decision: no jobs.yaml. jobs handler. reflector handler. both can query and emit envelopes. jobs are triggered by time and provided state persisted by the job handler (e.g. for bloom window). reflectors are triggered by events and we don't need state for those yet but maybe we will.  
+
+infinite loops are a problem with our current event bus system.
+but it's easy to add some protection against it and limit to 100 tries e.g.  

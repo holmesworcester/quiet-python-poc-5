@@ -11,7 +11,7 @@ from .events.group import commands as group_commands
 from .events.channel import commands as channel_commands
 from .events.message import commands as message_commands
 from .events.invite import commands as invite_commands
-from .events.add import commands as add_commands
+from .events.member import commands as member_commands
 from .events.key import commands as key_commands
 from .events.transit_secret import commands as transit_secret_commands
 from .events.peer import commands as peer_commands

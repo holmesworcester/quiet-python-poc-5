@@ -37,6 +37,7 @@ class TestGroupProjector:
                 }
             },
             'event_type': 'group',
+            'event_id': 'test-group-id',  # The projector uses this as group_id
             'peer_id': 'test-creator',
             'network_id': 'test-network'
         }
@@ -91,9 +92,13 @@ class TestGroupProjector:
                 'creator_id': 'test-creator',
                 'created_at': int(time.time() * 1000)
                 # No permissions field
-            }
+            },
+            'event_type': 'group',
+            'event_id': 'test-group-2',  # The projector uses this as group_id
+            'peer_id': 'test-creator',
+            'network_id': 'test-network'
         }
-        
+
         deltas = project(envelope)
         
         # Permissions should default to empty dict
@@ -168,7 +173,11 @@ class TestGroupProjector:
                 'creator_id': 'creator-1',
                 'created_at': 1000,
                 'permissions': {'message': ['all']}
-            }
+            },
+            'event_type': 'group',
+            'event_id': 'group-1',
+            'peer_id': 'creator-1',
+            'network_id': 'network-1'
         }
         
         # Second group
@@ -181,7 +190,11 @@ class TestGroupProjector:
                 'creator_id': 'creator-2',
                 'created_at': 2000,
                 'permissions': {'invite': ['admin']}
-            }
+            },
+            'event_type': 'group',
+            'event_id': 'group-2',
+            'peer_id': 'creator-2',
+            'network_id': 'network-1'
         }
         
         deltas1 = project(envelope1)

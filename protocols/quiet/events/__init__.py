@@ -16,7 +16,6 @@ from .registry import (
     MessageEventData,
     InviteEventData,
     UserEventData,
-    AddEventData,
     # Command parameter types
     CreateIdentityParams,
     CreateNetworkParams,
@@ -27,7 +26,6 @@ from .registry import (
     CreateMessageParams,
     CreateInviteParams,
     CreateUserParams,
-    CreateAddParams,
 )
 
 __all__ = [
@@ -43,7 +41,6 @@ __all__ = [
     "MessageEventData",
     "InviteEventData",
     "UserEventData",
-    "AddEventData",
     "CreateIdentityParams",
     "CreateNetworkParams",
     "CreateKeyParams",
@@ -53,5 +50,4 @@ __all__ = [
     "CreateMessageParams",
     "CreateInviteParams",
     "CreateUserParams",
-    "CreateAddParams",
 ]

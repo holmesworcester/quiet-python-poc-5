@@ -63,12 +63,13 @@ def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, Any]:
                 key_id,
                 unsealed_secret,
                 group_id,
+                network_id,
                 received_at,
                 origin_ip,
                 origin_port,
                 stored_at,
                 purged
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             event_id,
             envelope.get('event_type'),
@@ -77,6 +78,7 @@ def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, Any]:
             envelope.get('key_id'),
             envelope.get('unsealed_secret'),
             envelope.get('group_id'),
+            envelope.get('network_id', ''),
             envelope.get('received_at'),
             envelope.get('origin_ip'),
             envelope.get('origin_port'),

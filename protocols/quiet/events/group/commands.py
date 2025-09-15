@@ -8,11 +8,11 @@ from core.core_types import command, response_handler
 
 
 @command
-def create_group(params: Dict[str, Any]) -> dict[str, Any]:
+def create_group(params: Dict[str, Any]) -> List[dict[str, Any]]:
     """
     Create a new group.
 
-    Returns an envelope with unsigned group event.
+    Returns a list of envelopes with group event and member event for the creator.
     """
     # Extract parameters with sensible defaults
     name = params.get('name', '') or 'unnamed-group'
@@ -30,17 +30,36 @@ def create_group(params: Dict[str, Any]) -> dict[str, Any]:
         'signature': ''  # Will be filled by sign handler
     }
     
-    # Create envelope
-    envelope: dict[str, Any] = {
-        'event_plaintext': event,
-        'event_type': 'group',
-        'self_created': True,
-        'peer_id': identity_id,
+    # Create member event for the creator
+    member_event: Dict[str, Any] = {
+        'type': 'member',
+        'group_id': '',  # Will be filled when group is created
+        'user_id': identity_id,
+        'added_by': identity_id,
         'network_id': network_id,
-        'deps': []  # Group creation doesn't depend on other events
+        'created_at': int(time.time() * 1000),
+        'signature': ''  # Will be filled by sign handler
     }
-    
-    return envelope
+
+    # Return group and member event envelopes
+    return [
+        {
+            'event_plaintext': event,
+            'event_type': 'group',
+            'self_created': True,
+            'peer_id': identity_id,
+            'network_id': network_id,
+            'deps': []  # Group creation doesn't depend on other events
+        },
+        {
+            'event_plaintext': member_event,
+            'event_type': 'member',
+            'self_created': True,
+            'peer_id': identity_id,
+            'network_id': network_id,
+            'deps': ['group:']  # Member depends on group existing
+        }
+    ]
 
 
 @response_handler('create_group')
