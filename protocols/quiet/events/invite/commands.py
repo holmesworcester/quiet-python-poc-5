@@ -33,14 +33,12 @@ def create_invite(params: Dict[str, Any]) -> dict[str, Any]:
     derived_key = kdf(invite_secret.encode(), salt=invite_salt)
     invite_pubkey = derived_key.hex()
 
-    # Create invite ID from pubkey hash
-    invite_id = hashlib.sha256(invite_pubkey.encode()).hexdigest()[:32]
-
     # Create invite event (unsigned)
+    # The invite_id will be the event_id (hash of the signed event)
     event: Dict[str, Any] = {
         'type': 'invite',
-        'invite_id': invite_id,
         'invite_pubkey': invite_pubkey,
+        'invite_secret': invite_secret,  # Store secret so response handler can recreate link
         'network_id': network_id,
         'group_id': group_id,
         'inviter_id': identity_id,
@@ -81,16 +79,33 @@ def create_invite_response(stored_ids: dict, params: dict, db: ReadOnlyConnectio
     # Get the invite that was just created
     invite_id = stored_ids.get('invite')
 
-    # Recreate the same invite link that was generated in the command
-    # This is a workaround since we can't pass the link through the pipeline
-    network_id = params.get('network_id', '')
-    group_id = params.get('group_id', '')
+    if not invite_id:
+        # No invite was stored, return empty result
+        return {
+            "ids": stored_ids,
+            "data": {}
+        }
 
-    # Generate the same invite secret (this won't match the original, but for demo purposes it's fine)
-    # In production, we'd store the invite_secret in the database
-    invite_secret = secrets.token_urlsafe(32)
+    # Query the database to get the invite details
+    # The invite_id is the event_id
+    cursor = db.execute(
+        "SELECT invite_secret, network_id, group_id FROM invites WHERE invite_id = ?",
+        (invite_id,)
+    )
+    row = cursor.fetchone()
 
-    # Create invite link data
+    if not row:
+        # Invite not found in database
+        return {
+            "ids": stored_ids,
+            "data": {}
+        }
+
+    invite_secret = row['invite_secret']
+    network_id = row['network_id']
+    group_id = row['group_id']
+
+    # Create invite link data using the actual stored secret
     invite_data = {
         'invite_secret': invite_secret,
         'network_id': network_id,
@@ -99,13 +114,16 @@ def create_invite_response(stored_ids: dict, params: dict, db: ReadOnlyConnectio
 
     # Encode invite link
     invite_json = json.dumps(invite_data)
-    invite_b64 = base64.b64encode(invite_json.encode()).decode()
-    invite_link = f"quiet://invite/{invite_b64}"
+    invite_code = base64.b64encode(invite_json.encode()).decode()
+    invite_link = f"quiet://invite/{invite_code}"
 
     return {
         "ids": stored_ids,
         "data": {
-            "invite_link": invite_link,
-            "invite_id": invite_id
+            "invite_link": invite_link,  # Full link for convenience
+            "invite_code": invite_code,  # Just the code for FE flexibility
+            "invite_id": invite_id,
+            "network_id": network_id,
+            "group_id": group_id
         }
     }

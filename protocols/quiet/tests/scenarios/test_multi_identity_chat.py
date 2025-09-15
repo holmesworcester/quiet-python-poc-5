@@ -1,137 +1,173 @@
 """
-Test multi-identity chat scenarios with single database.
+Tests for multi-identity chat scenarios.
 
-These tests demonstrate the proper architecture where multiple identities
-exist in a single client database and communicate via loopback.
+These tests use the APIClient directly, mirroring production usage from demo.py.
 """
-import pytest
+import tempfile
+from pathlib import Path
+from core.api import APIClient
 
 
 class TestMultiIdentityChat:
     """Test multiple identities chatting in the same database."""
 
-    def test_two_identities_basic_chat(self, test_context):
-        """Test two identities can chat in the same network."""
-        # Create two identities
-        alice_id = test_context.create_identity("Alice")
-        bob_id = test_context.create_identity("Bob")
+    def test_two_identities_separate_networks(self):
+        """Test that two identities with separate networks don't see each other's messages."""
+        # Setup API client with temporary database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            api = APIClient(
+                protocol_dir=Path(__file__).parent.parent.parent,  # protocols/quiet
+                reset_db=True,
+                db_path=Path(tmp.name)
+            )
 
-        # Alice creates a network with a user event
-        network_id = test_context.create_network("Alice", "Test Network", username="Alice")
+            # Create two identities
+            alice_result = api.execute_operation('create_identity', {'name': 'Alice'})
+            alice_id = alice_result['ids']['identity']
 
-        # Alice creates a group
-        group_id = test_context.create_group("Alice", "Main Group", "Test Network")
+            bob_result = api.execute_operation('create_identity', {'name': 'Bob'})
+            bob_id = bob_result['ids']['identity']
 
-        # Alice creates a channel
-        channel_id = test_context.create_channel("Alice", "general", "Main Group", "Test Network")
+            # Each creates their own network
+            alice_network = api.execute_operation('create_network', {
+                'identity_id': alice_id,
+                'name': 'Alice Private Network',
+                'username': 'Alice'
+            })
+            alice_channel_id = alice_network['ids']['channel']
 
-        # Bob joins the network
-        test_context.join_network("Bob", "Test Network", username="Bob")
+            bob_network = api.execute_operation('create_network', {
+                'identity_id': bob_id,
+                'name': 'Bob Private Network',
+                'username': 'Bob'
+            })
+            bob_channel_id = bob_network['ids']['channel']
 
-        # Alice sends a message
-        alice_msg_id = test_context.send_message("Alice", "Hello Bob!", "general")
-        assert alice_msg_id is not None
+            # Each sends messages in their own network
+            alice_msg = api.execute_operation('create_message', {
+                'identity_id': alice_id,
+                'channel_id': alice_channel_id,
+                'content': "Alice's secret message"
+            })
 
-        # Bob sends a reply
-        bob_msg_id = test_context.send_message("Bob", "Hi Alice!", "general")
-        assert bob_msg_id is not None
+            bob_msg = api.execute_operation('create_message', {
+                'identity_id': bob_id,
+                'channel_id': bob_channel_id,
+                'content': "Bob's confidential message"
+            })
 
-        # Both should see both messages
-        alice_view = test_context.get_messages("Alice", "general")
-        assert len(alice_view) >= 2
+            # Query messages (using API queries with identity_id)
+            alice_messages = api.execute_operation('get_messages', {
+                'identity_id': alice_id,
+                'channel_id': alice_channel_id
+            })
+            alice_contents = [msg['content'] for msg in alice_messages]
+            assert "Alice's secret message" in alice_contents
+            assert "Bob's confidential message" not in alice_contents
 
-        messages_content = [msg.get('content') for msg in alice_view]
-        assert "Hello Bob!" in messages_content
-        assert "Hi Alice!" in messages_content
+            bob_messages = api.execute_operation('get_messages', {
+                'identity_id': bob_id,
+                'channel_id': bob_channel_id
+            })
+            bob_contents = [msg['content'] for msg in bob_messages]
+            assert "Bob's confidential message" in bob_contents
+            assert "Alice's secret message" not in bob_contents
 
-    def test_three_identities_group_chat(self, test_context):
-        """Test three identities in a group chat."""
-        # Create three identities
-        alice_id = test_context.create_identity("Alice")
-        bob_id = test_context.create_identity("Bob")
-        charlie_id = test_context.create_identity("Charlie")
 
-        # Alice creates the infrastructure
-        network_id = test_context.create_network("Alice", "Group Chat Network", username="Alice")
-        group_id = test_context.create_group("Alice", "Chat Group", "Group Chat Network")
-        channel_id = test_context.create_channel("Alice", "general", "Chat Group", "Group Chat Network")
+    def test_three_identities_with_invites(self):
+        """Test three identities joining and chatting via invite system."""
+        # Setup API client with temporary database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            api = APIClient(
+                protocol_dir=Path(__file__).parent.parent.parent,  # protocols/quiet
+                reset_db=True,
+                db_path=Path(tmp.name)
+            )
 
-        # Bob and Charlie join
-        test_context.join_network("Bob", "Group Chat Network", username="Bob")
-        test_context.join_network("Charlie", "Group Chat Network", username="Charlie")
+            # Alice creates an identity and network
+            alice_result = api.execute_operation('create_identity', {'name': 'Alice'})
+            alice_id = alice_result['ids']['identity']
 
-        # Everyone sends messages
-        test_context.send_message("Alice", "Welcome everyone!", "general")
-        test_context.send_message("Bob", "Thanks for the invite!", "general")
-        test_context.send_message("Charlie", "Happy to be here!", "general")
+            network_result = api.execute_operation('create_network', {
+                'identity_id': alice_id,
+                'name': 'Group Chat Network',
+                'username': 'Alice'
+            })
+            network_id = network_result['ids']['network']
+            group_id = network_result['ids']['group']
+            channel_id = network_result['ids']['channel']
 
-        # Check everyone can see all messages
-        messages = test_context.get_messages("Alice", "general")
-        assert len(messages) >= 3
+            # Alice creates an invite link
+            invite_result = api.execute_operation('create_invite', {
+                'identity_id': alice_id,
+                'network_id': network_id,
+                'group_id': group_id
+            })
 
-        contents = [msg.get('content') for msg in messages]
-        assert "Welcome everyone!" in contents
-        assert "Thanks for the invite!" in contents
-        assert "Happy to be here!" in contents
+            # Get the invite link from the API response
+            invite_link = invite_result['data']['invite_link']
 
-    def test_identity_isolation(self, test_context):
-        """Test that identities only see their own networks."""
-        # Create two separate networks with different identities
-        alice_id = test_context.create_identity("Alice")
-        bob_id = test_context.create_identity("Bob")
+            # Bob joins using the invite link
+            bob_join = api.execute_operation('join_as_user', {
+            'invite_link': invite_link,
+            'name': 'Bob'
+            })
+            bob_id = bob_join.get('ids', {}).get('identity', bob_join.get('ids', {}).get('peer'))
+            assert bob_id, "Bob failed to join the network"
 
-        # Alice creates her network
-        alice_network = test_context.create_network("Alice", "Alice Network", username="Alice")
-        alice_group = test_context.create_group("Alice", "Alice Group", "Alice Network")
-        alice_channel = test_context.create_channel("Alice", "alice-chat", "Alice Group", "Alice Network")
+            # Charlie joins using the same invite link
+            charlie_join = api.execute_operation('join_as_user', {
+            'invite_link': invite_link,
+            'name': 'Charlie'
+            })
+            charlie_id = charlie_join.get('ids', {}).get('identity', charlie_join.get('ids', {}).get('peer'))
+            assert charlie_id, "Charlie failed to join the network"
 
-        # Bob creates his own separate network
-        bob_network = test_context.create_network("Bob", "Bob Network", username="Bob")
-        bob_group = test_context.create_group("Bob", "Bob Group", "Bob Network")
-        bob_channel = test_context.create_channel("Bob", "bob-chat", "Bob Group", "Bob Network")
+            # Everyone sends messages
+            alice_msg = api.execute_operation('create_message', {
+            'identity_id': alice_id,
+            'channel_id': channel_id,
+            'content': 'Welcome everyone!'
+            })
 
-        # Each sends a message in their own network
-        test_context.send_message("Alice", "Alice's private message", "alice-chat")
-        test_context.send_message("Bob", "Bob's private message", "bob-chat")
+            bob_msg = api.execute_operation('create_message', {
+                'identity_id': bob_id,
+                'channel_id': channel_id,
+                'content': 'Thanks for the invite!'
+            })
 
-        # Alice shouldn't see Bob's message
-        alice_messages = test_context.get_messages("Alice", "alice-chat")
-        alice_contents = [msg.get('content') for msg in alice_messages]
-        assert "Alice's private message" in alice_contents
-        assert "Bob's private message" not in alice_contents
+            charlie_msg = api.execute_operation('create_message', {
+                'identity_id': charlie_id,
+                'channel_id': channel_id,
+                'content': 'Happy to be here!'
+            })
 
-        # Bob shouldn't see Alice's message
-        bob_messages = test_context.get_messages("Bob", "bob-chat")
-        bob_contents = [msg.get('content') for msg in bob_messages]
-        assert "Bob's private message" in bob_contents
-        assert "Alice's private message" not in bob_contents
+            # Check that each identity can see all messages
+            expected_messages = ['Welcome everyone!', 'Thanks for the invite!', 'Happy to be here!']
 
-    def test_sync_between_identities(self, test_context):
-        """Test sync job exchanges events between identities."""
-        # Skip this test for now - sync needs more work
-        import pytest
-        pytest.skip("Sync job needs refactoring to work properly")
+            # Alice sees all messages
+            alice_messages = api.execute_operation('get_messages', {
+                'identity_id': alice_id,
+                'channel_id': channel_id
+            })
+            alice_contents = [msg['content'] for msg in alice_messages]
+            for msg in expected_messages:
+                assert msg in alice_contents, f"Alice can't see message: {msg}"
 
-    def test_loopback_sync_simulation(self, test_context):
-        """Test direct sync simulation between two identities."""
-        # Create identities
-        alice_id = test_context.create_identity("Alice")
-        bob_id = test_context.create_identity("Bob")
+            # Bob sees all messages
+            bob_messages = api.execute_operation('get_messages', {
+                'identity_id': bob_id,
+                'channel_id': channel_id
+            })
+            bob_contents = [msg['content'] for msg in bob_messages]
+            for msg in expected_messages:
+                assert msg in bob_contents, f"Bob can't see message: {msg}"
 
-        # Set up network
-        network_id = test_context.create_network("Alice", "Loopback Network", username="Alice")
-        group_id = test_context.create_group("Alice", "Loopback Group", "Loopback Network")
-        channel_id = test_context.create_channel("Alice", "loopback-channel", "Loopback Group", "Loopback Network")
-
-        # Bob joins
-        test_context.join_network("Bob", "Loopback Network", username="Bob")
-
-        # Alice sends a message
-        test_context.send_message("Alice", "Testing loopback sync", "loopback-channel")
-
-        # Messages are visible immediately in single database
-        # No need for explicit sync
-        messages = test_context.get_messages("Bob", "loopback-channel")
-        contents = [msg.get('content') for msg in messages]
-        assert "Testing loopback sync" in contents
-
+            # Charlie sees all messages
+            charlie_messages = api.execute_operation('get_messages', {
+                'identity_id': charlie_id,
+                'channel_id': channel_id
+            })
+            charlie_contents = [msg['content'] for msg in charlie_messages]
+            for msg in expected_messages:
+                assert msg in charlie_contents, f"Charlie can't see message: {msg}"

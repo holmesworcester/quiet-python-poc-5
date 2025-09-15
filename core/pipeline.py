@@ -4,6 +4,7 @@ Supports verbose logging and database inspection.
 """
 import importlib
 import json
+import hashlib
 import sqlite3
 import time
 from pathlib import Path
@@ -228,24 +229,45 @@ class PipelineRunner:
 
         queue = no_placeholder_queue
         iterations = 0
-        max_iterations = 100  # Strict limit to prevent infinite loops
+
+        # Track per-envelope processing count to detect loops
+        envelope_process_count: Dict[str, int] = {}
+        max_envelope_processes = 100  # Max times a single envelope can be processed
 
         # Track total envelopes processed across all iterations for diagnostics
         total_envelopes_processed = 0
 
-        while queue and iterations < max_iterations:
+        while queue:
             iterations += 1
             total_envelopes_processed += len(queue)
 
             if self.verbose:
                 self.log(f"--- Iteration {iterations} with {len(queue)} envelopes (no placeholders) ---")
 
-            # Warn if we're processing a lot of iterations
-            if iterations % 100 == 0:
-                self.log(f"WARNING: Pipeline at iteration {iterations}, total envelopes processed: {total_envelopes_processed}")
-
             next_queue = []
             for envelope in queue:
+                # Generate a tracking ID for this envelope based on its content
+                # We use a hash of key fields to identify "same" envelope
+                tracking_fields = {
+                    'event_type': envelope.get('event_type', ''),
+                    'event_plaintext': envelope.get('event_plaintext', {}),
+                    'peer_id': envelope.get('peer_id', ''),
+                    'network_id': envelope.get('network_id', ''),
+                }
+                tracking_id = hashlib.sha256(
+                    json.dumps(tracking_fields, sort_keys=True).encode()
+                ).hexdigest()[:16]
+
+                # Check if this envelope has been processed too many times
+                if tracking_id in envelope_process_count:
+                    envelope_process_count[tracking_id] += 1
+                    if envelope_process_count[tracking_id] > max_envelope_processes:
+                        self.log(f"ERROR: Envelope loop detected! Envelope {tracking_id} processed {envelope_process_count[tracking_id]} times")
+                        self.log(f"ERROR: Dropping envelope of type {envelope.get('event_type', 'unknown')}")
+                        continue  # Skip this envelope
+                else:
+                    envelope_process_count[tracking_id] = 1
+
                 self.processed_count += 1
 
                 # Process through all matching handlers
@@ -292,16 +314,6 @@ class PipelineRunner:
 
             queue = next_queue
 
-        # Check if we hit the iteration limit
-        if queue and iterations >= max_iterations:
-            self.log(f"ERROR: Pipeline hit maximum iteration limit ({max_iterations})")
-            self.log(f"ERROR: {len(queue)} envelopes still in queue after {total_envelopes_processed} total processed")
-            self.log(f"ERROR: This indicates an infinite loop in the pipeline")
-            # Log first few envelopes for debugging
-            for i, env in enumerate(queue[:3]):
-                self.log(f"ERROR: Envelope {i}: type={env.get('event_type')}, id={env.get('event_id', 'unknown')}")
-            raise RuntimeError(f"Pipeline infinite loop detected: {iterations} iterations reached with {len(queue)} envelopes still in queue")
-
         # Now process events with placeholders
         if placeholder_queue:
             if self.verbose:
@@ -310,21 +322,38 @@ class PipelineRunner:
             queue = placeholder_queue
             placeholder_iterations = 0
 
-            while queue and placeholder_iterations < max_iterations:
+            while queue:
                 placeholder_iterations += 1
                 total_envelopes_processed += len(queue)
 
                 if self.verbose:
                     self.log(f"--- Placeholder iteration {placeholder_iterations} with {len(queue)} envelopes ---")
 
-                # Warn if we're processing a lot of iterations
-                if (iterations + placeholder_iterations) % 100 == 0:
-                    self.log(f"WARNING: Pipeline at iteration {iterations + placeholder_iterations}, total envelopes processed: {total_envelopes_processed}")
-
                 next_queue = []
                 for envelope in queue:
                     # Resolve placeholders in this envelope before processing
                     self._resolve_placeholders(envelope, generated_ids)
+
+                    # Generate tracking ID for loop detection
+                    tracking_fields = {
+                        'event_type': envelope.get('event_type', ''),
+                        'event_plaintext': envelope.get('event_plaintext', {}),
+                        'peer_id': envelope.get('peer_id', ''),
+                        'network_id': envelope.get('network_id', ''),
+                    }
+                    tracking_id = hashlib.sha256(
+                        json.dumps(tracking_fields, sort_keys=True).encode()
+                    ).hexdigest()[:16]
+
+                    # Check if this envelope has been processed too many times
+                    if tracking_id in envelope_process_count:
+                        envelope_process_count[tracking_id] += 1
+                        if envelope_process_count[tracking_id] > max_envelope_processes:
+                            self.log(f"ERROR: Envelope loop detected! Envelope {tracking_id} processed {envelope_process_count[tracking_id]} times")
+                            self.log(f"ERROR: Dropping envelope of type {envelope.get('event_type', 'unknown')}")
+                            continue  # Skip this envelope
+                    else:
+                        envelope_process_count[tracking_id] = 1
 
                     self.processed_count += 1
 
@@ -356,11 +385,6 @@ class PipelineRunner:
                 queue = next_queue
                 iterations += 1
 
-        if iterations >= max_iterations:
-            self.log(f"ERROR: Stopped after {max_iterations} iterations (infinite loop detected)")
-            self.log(f"Total envelopes processed: {total_envelopes_processed}")
-            raise RuntimeError(f"Pipeline infinite loop detected after {max_iterations} iterations")
-
         # Track stored events (only return one per type)
         # Use a dict to track unique events by event_id to avoid counting duplicates
         stored_events_by_id = {}
@@ -384,7 +408,8 @@ class PipelineRunner:
             if event_type not in event_ids:
                 event_ids[event_type] = event_id
 
-        # Only return IDs for types with exactly one event
+        # Return all event IDs where there's exactly one event of that type
+        # This allows commands that create multiple different event types to return all IDs
         stored_ids = {}
         for event_type, count in event_counts.items():
             if count == 1:

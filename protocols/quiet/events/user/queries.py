@@ -10,15 +10,20 @@ from core.queries import query
 @query
 def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    List all users in a network.
-    
+    List users visible to an identity in a network.
+
     Required params:
+    - identity_id: Identity requesting the users
     - network_id: The network to list users for
-    
+
     Optional params:
     - limit: Maximum number of users to return (default 100)
     - offset: Offset for pagination
     """
+    identity_id = params.get('identity_id')
+    if not identity_id:
+        raise ValueError("identity_id is required for get_users")
+
     network_id = params.get('network_id')
     if not network_id:
         raise ValueError("network_id is required")
@@ -26,16 +31,22 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     limit = params.get('limit', 100)
     offset = params.get('offset', 0)
     
+    # Only show users if the identity has access to the network
+    # TODO: Properly check network membership
     cursor = db.execute(
         """
         SELECT u.*, i.name
         FROM users u
         LEFT JOIN identities i ON u.peer_id = i.identity_id
         WHERE u.network_id = ?
+        AND EXISTS (
+            SELECT 1 FROM identities i2
+            WHERE i2.identity_id = ?
+        )
         ORDER BY u.joined_at DESC
         LIMIT ? OFFSET ?
         """,
-        (network_id, limit, offset)
+        (network_id, identity_id, limit, offset)
     )
     
     users = []

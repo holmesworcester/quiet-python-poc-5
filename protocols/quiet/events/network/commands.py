@@ -41,13 +41,38 @@ def create_network(params: Dict[str, Any]) -> List[dict[str, Any]]:
         user_event: Dict[str, Any] = {
             'type': 'user',
             'user_id': creator_id,
-            'network_id': '',  # Will be filled when network is created
+            'network_id': '@generated:network:0',  # Reference to the network we're creating
             'username': params.get('username', 'Creator'),
             'created_at': created_at,
             'signature': ''  # Will be filled by sign handler
         }
 
-        # Return network and user event envelopes
+        # Create default group
+        default_group_name = params.get('default_group_name', 'General')
+        group_event: Dict[str, Any] = {
+            'type': 'group',
+            'group_id': '',  # Will be filled by encrypt handler
+            'network_id': '@generated:network:0',  # Reference to the network we're creating
+            'name': default_group_name,
+            'creator_id': creator_id,
+            'created_at': created_at,
+            'signature': ''  # Will be filled by sign handler
+        }
+
+        # Create default channel in the default group
+        default_channel_name = params.get('default_channel_name', 'general')
+        channel_event: Dict[str, Any] = {
+            'type': 'channel',
+            'channel_id': '',  # Will be filled by encrypt handler
+            'group_id': '@generated:group:0',  # Reference to the group we're creating
+            'network_id': '@generated:network:0',  # Reference to the network we're creating
+            'name': default_channel_name,
+            'creator_id': creator_id,
+            'created_at': created_at,
+            'signature': ''  # Will be filled by sign handler
+        }
+
+        # Return network, user, group, and channel event envelopes
         return [
             {
                 'event_plaintext': network_event,
@@ -63,7 +88,23 @@ def create_network(params: Dict[str, Any]) -> List[dict[str, Any]]:
                 'self_created': True,
                 'peer_id': creator_id,
                 'network_id': '',  # Will be filled when network is created
-                'deps': ['network:']  # User depends on network existing
+                'deps': ['@generated:network:0']  # User depends on the network we're creating
+            },
+            {
+                'event_plaintext': group_event,
+                'event_type': 'group',
+                'self_created': True,
+                'peer_id': creator_id,
+                'network_id': '',  # Will be filled when network is created
+                'deps': ['@generated:network:0']  # Group depends on the network we're creating
+            },
+            {
+                'event_plaintext': channel_event,
+                'event_type': 'channel',
+                'self_created': True,
+                'peer_id': creator_id,
+                'network_id': '',  # Will be filled when network is created
+                'deps': ['@generated:group:0']  # Channel depends on the group
             }
         ]
     else:

@@ -10,17 +10,33 @@ from core.queries import query
 @query
 def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    List all channels.
-    
+    List channels visible to an identity.
+
+    Required params:
+    - identity_id: Identity requesting the channels
+
     Optional params:
     - group_id: Filter by group
     - network_id: Filter by network
     """
+    # identity_id is required for access control
+    identity_id = params.get('identity_id')
+    if not identity_id:
+        raise ValueError("identity_id is required for get_channels")
+
     group_id = params.get('group_id')
     network_id = params.get('network_id')
-    
-    query = "SELECT * FROM channels WHERE 1=1"
-    query_params = []
+
+    # Only show channels the identity has access to
+    # TODO: Check group membership properly
+    query = """
+        SELECT * FROM channels
+        WHERE EXISTS (
+            SELECT 1 FROM identities i
+            WHERE i.identity_id = ?
+        )
+    """
+    query_params = [identity_id]
     
     if group_id:
         query += " AND group_id = ?"

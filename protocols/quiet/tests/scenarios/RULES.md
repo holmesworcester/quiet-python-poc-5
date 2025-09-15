@@ -2,6 +2,10 @@
 
 ## Core Testing Principles
 
+### 0. No help from conftest.py
+
+We should be using raw, production API and pipeline in a setup that closely mirrors what demo.py uses.
+
 ### 1. API-Only Access Rule
 
 All scenario tests MUST use only API calls to interact with the system. Direct database access is PROHIBITED.
@@ -75,12 +79,12 @@ Tests should verify the complete event flow through the pipeline:
 
 1. Command creates envelope with dependencies
 2. Handlers process envelope (crypto, validation, storage)
-3. Reflectors respond to events (e.g., sync responses)
+3. Responders respond to events (e.g., sync responses)
 4. Jobs run periodically (e.g., sync requests)
 
-### 6. No Direct Handler/Job/Reflector Access
+### 6. No Direct Handler/Job/Responder Access
 
-Tests should not directly call handlers, jobs, or reflectors. These are triggered through the pipeline.
+Tests should not directly call handlers, jobs, or responders. These are triggered through the pipeline.
 
 ❌ **DON'T**: Call handlers directly
 ```python
@@ -119,7 +123,7 @@ Use the correct command names as defined in the protocol:
 
 Remember that some events are processed asynchronously:
 - Jobs run on schedules
-- Reflectors respond to incoming events
+- Responders respond to incoming events
 - Use appropriate waits or polling when testing async behavior
 
 ## Why These Rules Exist

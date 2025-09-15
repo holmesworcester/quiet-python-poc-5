@@ -152,7 +152,7 @@ def test_placeholder_resolution():
     
     # User deps should also have placeholder
     assert '@generated:peer:0' in user_env['deps'], "User deps should have placeholder"
-    print(f"✓ User deps have placeholder: {@generated:peer:0' in user_env['deps']}")
+    print(f"✓ User deps have placeholder: {'@generated:peer:0' in user_env['deps']}")
     
     return True
 

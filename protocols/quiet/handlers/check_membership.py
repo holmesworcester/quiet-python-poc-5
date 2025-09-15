@@ -56,12 +56,12 @@ def handler(envelope: dict[str, Any]) -> dict[str, Any]:
     
     return envelope
 
-class MembershipCheckHandler(Handler):
-    """Handler for membership check."""
+class CheckMembershipHandler(Handler):
+    """Handler for checking group membership."""
 
     @property
     def name(self) -> str:
-        return "membership_check"
+        return "check_membership"
 
     def filter(self, envelope: dict[str, Any]) -> bool:
         """Check if this handler should process the envelope."""

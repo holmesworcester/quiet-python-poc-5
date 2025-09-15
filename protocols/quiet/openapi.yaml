@@ -164,8 +164,8 @@ paths:
   
   /users/join:
     post:
-      summary: Join a network using an invite code
-      operationId: join_network
+      summary: Join a network as a user using an invite link
+      operationId: join_as_user
       requestBody:
         required: true
         content:
@@ -173,20 +173,15 @@ paths:
             schema:
               type: object
               required:
-                - invite_code
+                - invite_link
+                - name
               properties:
-                invite_code:
+                invite_link:
                   type: string
-                  description: Invite code to join with
+                  description: Invite link to join with (quiet://invite/...)
                 name:
                   type: string
                   description: Name for the new user
-                network_id:
-                  type: string
-                  description: Network ID from invite
-                inviter_id:
-                  type: string
-                  description: ID of the inviter
       responses:
         '200':
           description: Successfully joined network
@@ -242,11 +237,18 @@ paths:
                     type: string
 
     get:
-      summary: List users in a network
+      summary: List users visible to an identity
       operationId: get_users
       parameters:
+        - name: identity_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Identity requesting the users
         - name: network_id
           in: query
+          required: true
           schema:
             type: string
           description: Filter by network ID
@@ -333,9 +335,15 @@ paths:
                           type: object
 
     get:
-      summary: List groups in a network
+      summary: List groups visible to an identity
       operationId: get_groups
       parameters:
+        - name: identity_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Identity requesting the groups
         - name: network_id
           in: query
           required: true
@@ -424,9 +432,15 @@ paths:
                           type: object
 
     get:
-      summary: List channels in a group
+      summary: List channels visible to an identity
       operationId: get_channels
       parameters:
+        - name: identity_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Identity requesting the channels
         - name: group_id
           in: query
           required: true
@@ -513,9 +527,15 @@ paths:
                           type: object
 
     get:
-      summary: List messages in a channel
+      summary: List messages visible to an identity
       operationId: get_messages
       parameters:
+        - name: identity_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Identity requesting the messages
         - name: channel_id
           in: query
           required: true

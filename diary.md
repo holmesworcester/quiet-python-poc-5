@@ -54,4 +54,10 @@ decisions: we keep protocol/quiet/jobs.yaml. we don't have protocol/quiet/jobs a
 better decision: no jobs.yaml. jobs handler. reflector handler. both can query and emit envelopes. jobs are triggered by time and provided state persisted by the job handler (e.g. for bloom window). reflectors are triggered by events and we don't need state for those yet but maybe we will.  
 
 infinite loops are a problem with our current event bus system.
-but it's easy to add some protection against it and limit to 100 tries e.g.  
+but it's easy to add some protection against it and limit to 100 tries e.g. -- did this and it should now emit a runtime error.
+
+- we decided we'd focus on closed-world twitter with team-managed accounts
+- and audio/video screen sharing with annotations
+
+we might want to flip the dependency and make group one of the refs of a network event, so that a network can name a main group so it's unambiguous. other groups could name network-id's. i should think about this because it's sensitive. 
+

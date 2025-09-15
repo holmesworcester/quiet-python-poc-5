@@ -1,16 +1,21 @@
-"""Responder for sync request - responds to sync requests with events."""
+"""Reflector for sync request - reflects sync requests with events."""
 
 import sqlite3
 from typing import Dict, List, Any, Tuple
 
 
-def sync_request_responder(envelope: Dict, db: sqlite3.Connection, time_now_ms: int) -> Tuple[bool, List[Dict]]:
+def sync_request_reflector(envelope: Dict, db: sqlite3.Connection, time_now_ms: int) -> Tuple[bool, List[Dict]]:
     """
-    Simple sync response responder - responds to sync requests with events.
+    Simple sync response reflector - reflects sync requests with events.
 
     When an identity receives a sync_request, it sends back events from that network.
     """
     try:
+        # Don't reflect to sync_request events that are already responses
+        if envelope.get('in_response_to'):
+            print("[sync_request_reflector] Ignoring sync_request that is already a response")
+            return True, []
+
         request = envelope.get('event_plaintext', {})
         network_id = request.get('network_id')
         request_id = request.get('request_id')
@@ -19,11 +24,11 @@ def sync_request_responder(envelope: Dict, db: sqlite3.Connection, time_now_ms: 
         last_sync_ms = request.get('last_sync_ms', 0)
 
         if not network_id:
-            print("[sync_request_responder] No network_id in sync request")
+            print("[sync_request_reflector] No network_id in sync request")
             return False, []
 
         if not from_identity:
-            print("[sync_request_responder] No from_identity in sync request")
+            print("[sync_request_reflector] No from_identity in sync request")
             return False, []
 
         # Check if we have the identity that was requested as a user in this network
@@ -34,21 +39,22 @@ def sync_request_responder(envelope: Dict, db: sqlite3.Connection, time_now_ms: 
         """, (to_peer, network_id)).fetchone()
 
         if not identity_exists:
-            print(f"[sync_request_responder] Identity {to_peer} not found in network {network_id}")
+            print(f"[sync_request_reflector] Identity {to_peer} not found in network {network_id}")
             return True, []  # Not an error, just not for us
 
         # Get events for this network since last sync
         # In a real system, we'd filter by what the requester is allowed to see
+        # IMPORTANT: Exclude sync_request events to prevent loops
         events = cursor.execute("""
             SELECT event_id, event_type, event_ciphertext
             FROM events
-            WHERE network_id = ? AND created_ms > ?
+            WHERE network_id = ? AND created_ms > ? AND event_type != 'sync_request'
             ORDER BY created_ms ASC
             LIMIT 100
         """, (network_id, last_sync_ms)).fetchall()
 
         if not events:
-            print(f"[sync_request_responder] No new events for network {network_id} since {last_sync_ms}")
+            print(f"[sync_request_reflector] No new events for network {network_id} since {last_sync_ms}")
             return True, []
 
         # Create response envelopes
@@ -66,9 +72,9 @@ def sync_request_responder(envelope: Dict, db: sqlite3.Connection, time_now_ms: 
             }
             response_envelopes.append(response)
 
-        print(f"[sync_request_responder] Identity {to_peer} sending {len(response_envelopes)} events to {from_identity}")
+        print(f"[sync_request_reflector] Identity {to_peer} sending {len(response_envelopes)} events to {from_identity}")
         return True, response_envelopes
 
     except Exception as e:
-        print(f"[sync_request_responder] Error: {e}")
+        print(f"[sync_request_reflector] Error: {e}")
         return False, []

@@ -13,8 +13,7 @@ For outgoing encryption, we can eliminate dedicated transit tables entirely:
 Incoming decryption can also use the dependency system:
 - Keys are persistently stored as key events or peer/identity events in the event store
 - For sync-request events, include `identity_id` (not `peer_id`) as the key reference since identity events contain the private key
-- resolve_deps can handle multi-level dependencies if needed (e.g., peer → identity)
-- The key_id in raw data tells us which key to use for decryption 
+- The key_id in raw data tells us which key to use for decryption (or unsealing) 
 
 ## Pros of Dependency-Based Encryption
 
