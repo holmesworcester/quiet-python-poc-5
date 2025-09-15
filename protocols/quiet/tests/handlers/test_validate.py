@@ -10,7 +10,7 @@ protocol_dir = Path(__file__).parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.handlers.validate.handler import ValidateHandler
+from protocols.quiet.handlers.validate import ValidateHandler
 
 
 class TestValidateHandler:

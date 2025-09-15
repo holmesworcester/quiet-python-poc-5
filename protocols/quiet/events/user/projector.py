@@ -7,21 +7,22 @@ from typing import Dict, Any, List
 def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Project user event to state.
-    
-    User events represent a peer joining the network and establish
-    their initial presence (even if offline).
-    
+
+    User events represent a peer joining the network via invite
+    and establish their membership in a group.
+
     Returns deltas to apply.
     """
     event_data = envelope.get('event_plaintext', {})
     user_id = event_data['user_id']
     peer_id = event_data['peer_id']
     network_id = event_data['network_id']
-    address = event_data['address']
-    port = event_data['port']
+    group_id = event_data['group_id']
+    name = event_data['name']
+    invite_pubkey = event_data['invite_pubkey']
     created_at = event_data['created_at']
-    
-    # Return deltas for creating user record
+
+    # Return deltas for creating user record and group membership
     deltas = [
         {
             'op': 'insert',
@@ -30,11 +31,20 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'user_id': user_id,
                 'peer_id': peer_id,
                 'network_id': network_id,
+                'name': name,
                 'joined_at': created_at,
-                'last_address': address,
-                'last_port': port
+                'invite_pubkey': invite_pubkey
+            }
+        },
+        {
+            'op': 'insert',
+            'table': 'group_members',
+            'data': {
+                'group_id': group_id,
+                'user_id': user_id,
+                'joined_at': created_at
             }
         }
     ]
-    
+
     return deltas

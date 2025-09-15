@@ -12,7 +12,7 @@ import time
 import uuid
 from core.handler_discovery import get_handler_path
 from core.handle import handle
-from core.events import validate_event
+from core.types import validate_event
 
 # Set up logging
 logger = logging.getLogger(__name__)

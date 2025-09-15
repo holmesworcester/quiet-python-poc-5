@@ -27,7 +27,7 @@ class SimpleTest(ScenarioTestBase):
         assert identity["created_at"] is not None
         
         # Verify identity appears in list
-        identities = alice.list_identities()
+        identities = alice.get_identities()
         assert len(identities) == 1
         assert identities[0]["peer_id"] == identity["identity_id"]
         

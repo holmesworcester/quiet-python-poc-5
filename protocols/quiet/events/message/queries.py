@@ -1,11 +1,14 @@
 """
 Queries for message event type.
 """
+from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
+from core.queries import query
 
 
-def list_messages(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
+@query
+def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     List messages.
     
@@ -34,7 +37,7 @@ def list_messages(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[s
     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
     query_params.extend([limit, offset])
     
-    cursor = db.execute(query, query_params)
+    cursor = db.execute(query, tuple(query_params))
     
     messages = []
     for row in cursor:

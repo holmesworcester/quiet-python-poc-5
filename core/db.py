@@ -6,7 +6,7 @@ from typing import Any, Optional
 import os
 
 
-def _load_schema_file(schema_file: str, conn: sqlite3.Connection):
+def _load_schema_file(schema_file: str, conn: sqlite3.Connection) -> None:
     """Load a schema file into the database."""
     with open(schema_file, 'r') as f:
         schema_sql = f.read()
@@ -25,7 +25,7 @@ def get_connection(db_path: str = "quiet.db") -> sqlite3.Connection:
     return conn
 
 
-def init_database(conn: sqlite3.Connection, protocol_dir: str = None):
+def init_database(conn: sqlite3.Connection, protocol_dir: Optional[str] = None) -> None:
     """Initialize database schema.
     
     The framework doesn't define any tables itself - all schema comes from:
@@ -66,8 +66,8 @@ def init_database(conn: sqlite3.Connection, protocol_dir: str = None):
                     for schema_file in glob.glob(os.path.join(handler_path, '*.schema.sql')):
                         _load_schema_file(schema_file, conn)
             
-            # Also check for schemas directly in handlers/
-            for schema_file in glob.glob(os.path.join(handlers_dir, '*.schema.sql')):
+            # Check for .sql files directly in handlers/ (new naming convention)
+            for schema_file in glob.glob(os.path.join(handlers_dir, '*.sql')):
                 _load_schema_file(schema_file, conn)
     
     conn.commit()
@@ -94,7 +94,7 @@ class ReadOnlyConnection:
         
         return self._conn.execute(sql, parameters)
     
-    def executemany(self, sql: str, seq_of_parameters) -> sqlite3.Cursor:
+    def executemany(self, sql: str, seq_of_parameters: Any) -> sqlite3.Cursor:
         """Execute many SQL queries (read-only)."""
         raise PermissionError("Read-only connection cannot execute multiple statements")
     
@@ -102,15 +102,15 @@ class ReadOnlyConnection:
         """Execute a SQL script (read-only)."""
         raise PermissionError("Read-only connection cannot execute scripts")
     
-    def commit(self):
+    def commit(self) -> None:
         """Commit is a no-op for read-only connections."""
         pass
     
-    def rollback(self):
+    def rollback(self) -> None:
         """Rollback is a no-op for read-only connections."""
         pass
     
-    def close(self):
+    def close(self) -> None:
         """Close the underlying connection."""
         # Don't actually close - let the owner of the real connection handle that
         pass
@@ -120,12 +120,12 @@ class ReadOnlyConnection:
         return self._conn.cursor()
     
     @property
-    def row_factory(self):
+    def row_factory(self) -> Any:
         """Get row factory."""
         return self._conn.row_factory
     
     @row_factory.setter
-    def row_factory(self, factory):
+    def row_factory(self, factory: Any) -> None:
         """Set row factory."""
         self._conn.row_factory = factory
 

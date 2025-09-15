@@ -11,7 +11,7 @@ protocol_dir = test_dir.parent.parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.events.identity.queries import list_identities
+from protocols.quiet.events.identity.queries import get as get_identities
 from protocols.quiet.events.identity.commands import create_identity
 
 
@@ -22,7 +22,7 @@ class TestIdentityQuery:
     @pytest.mark.event_type
     def test_list_empty_identities(self, initialized_db):
         """Test listing identities when none exist."""
-        result = list_identities({}, initialized_db)
+        result = get_identities(initialized_db, {})
         assert result == []
     
     @pytest.mark.unit
@@ -31,11 +31,11 @@ class TestIdentityQuery:
         """Test listing a single identity."""
         # Create an identity
         params = {"network_id": "test-network"}
-        envelopes = create_identity(params, initialized_db)
-        created_event = envelopes[0]["event_plaintext"]
+        envelope = create_identity(params)
+        created_event = envelope["event_plaintext"]
         
         # List identities
-        result = list_identities({}, initialized_db)
+        result = get_identities(initialized_db, {})
         
         assert len(result) == 1
         assert result[0]["identity_id"] == created_event["peer_id"]
@@ -50,11 +50,11 @@ class TestIdentityQuery:
         identities = []
         for i in range(3):
             params = {"network_id": f"network-{i}"}
-            envelopes = create_identity(params, initialized_db)
-            identities.append(envelopes[0]["event_plaintext"])
+            envelope = create_identity(params)
+            identities.append(envelope["event_plaintext"])
         
         # List all identities
-        result = list_identities({}, initialized_db)
+        result = get_identities(initialized_db, {})
         
         assert len(result) == 3
         
@@ -73,11 +73,11 @@ class TestIdentityQuery:
         """Test that binary peer_ids are converted to hex strings."""
         # Create an identity
         params = {"network_id": "test-network"}
-        envelopes = create_identity(params, initialized_db)
-        peer_id = envelopes[0]["event_plaintext"]["peer_id"]
+        envelope = create_identity(params)
+        peer_id = envelope["event_plaintext"]["peer_id"]
         
         # List identities
-        result = list_identities({}, initialized_db)
+        result = get_identities(initialized_db, {})
         
         # Verify the identity_id is a hex string
         assert len(result) == 1
@@ -93,10 +93,10 @@ class TestIdentityQuery:
         """Test that list returns only the expected fields."""
         # Create an identity
         params = {"network_id": "test-network"}
-        create_identity(params, initialized_db)
+        create_identity(params)
         
         # List identities
-        result = list_identities({}, initialized_db)
+        result = get_identities(initialized_db, {})
         
         assert len(result) == 1
         identity = result[0]

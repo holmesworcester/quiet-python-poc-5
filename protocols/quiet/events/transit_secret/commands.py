@@ -4,11 +4,11 @@ Commands for transit secret event type.
 import time
 from typing import Dict, Any
 from core.crypto import generate_secret
-from core.types import Envelope, command
+from core.core_types import command
 
 
 @command
-def create_transit_secret(params: Dict[str, Any]) -> Envelope:
+def create_transit_secret(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a new transit encryption key.
     
@@ -32,7 +32,7 @@ def create_transit_secret(params: Dict[str, Any]) -> Envelope:
     }
     
     # Create envelope
-    envelope: Envelope = {
+    envelope: dict[str, Any] = {
         'event_plaintext': event,
         'event_type': 'transit_secret',
         'self_created': True,

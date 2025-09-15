@@ -36,3 +36,14 @@ Ways to challenge the design:
 - Vetting new community members with an application form 
 - ban together flow. Curate ban lists for others to use. 
 - Real time, performance, permissioning
+
+Todo: when we add removal, we need to check if removed as a last step in the pipeline, before projecting, and all removals must go in a queue that is processed serially by the remove checker, which also purges things. 
+
+having commands use a pipeline instead of generating right off the bat is challenging:
+1. they often need to provide an id in a response (easy solution: return id's)
+2. they often need to provide query results in a response (easy solution: let them specify a query and run it after projecting all envelopes, and return that)
+3. they often need to make multiple events that reference each other. (maybe: use placeholder refs that get filled in by update deps in the looping pipeline process???'')'
+
+- ended up using placeholder deps and resolve_deps to fill them in as the events got signed and encrypted and stored
+- with user events there was the awkward issue that we didn't have the invite event yet, so we couldn't test that our join operation was successful. since we are assuming that invite links are valid I exempted us from requiring the invite event in the self-signed case, but that's a bit weird and could be refined. maybe not validating until real join is the right answer.
+- we couldn't run the whole pipeline and test that it filled in correctly without having a test that actually checked the api results (and ran the whole pipeline loop to get them) so I made command tests check the API results too. this makes them more complicated but is necessary to capture the functionality and closer to a real integration test. we can still have the simpler envelope-only tests

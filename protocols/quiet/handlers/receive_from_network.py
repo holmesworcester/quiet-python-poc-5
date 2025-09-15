@@ -5,9 +5,10 @@ Extracts transit layer information from raw network data.
 import time
 from typing import List, Dict, Any
 import sqlite3
-from core.handler import Handler
+from core.handlers import Handler
 from core.crypto import hash
-from core.types import Envelope, NetworkEnvelope, TransitEnvelope, validate_envelope_fields, cast_envelope
+from protocols.quiet.protocol_types import validate_envelope_fields, cast_envelope
+# TODO: Handle imports: NetworkEnvelope, TransitEnvelope
 
 
 class ReceiveFromNetworkHandler(Handler):
@@ -21,7 +22,7 @@ class ReceiveFromNetworkHandler(Handler):
     def name(self) -> str:
         return "receive_from_network"
     
-    def filter(self, envelope: Envelope) -> bool:
+    def filter(self, envelope: dict[str, Any]) -> bool:
         """Process envelopes with raw network data."""
         # Validate we have NetworkEnvelope required fields
         return (
@@ -29,7 +30,7 @@ class ReceiveFromNetworkHandler(Handler):
             envelope.get('transit_key_id') is None  # Not yet processed
         )
     
-    def process(self, envelope: Envelope, db: sqlite3.Connection) -> List[Envelope]:
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
         """Extract transit key ID and ciphertext from raw data."""
         # Runtime validation - ensure we have required fields
         if not validate_envelope_fields(envelope, {'raw_data', 'origin_ip', 'origin_port', 'received_at'}):
@@ -49,7 +50,7 @@ class ReceiveFromNetworkHandler(Handler):
         
         # Create new envelope with transit info
         transit_key_id_hex = transit_key_id.hex()
-        new_envelope: Envelope = {
+        new_envelope: dict[str, Any] = {
             'origin_ip': envelope['origin_ip'],
             'origin_port': envelope['origin_port'],
             'received_at': envelope['received_at'],

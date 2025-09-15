@@ -15,7 +15,8 @@ project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.db import get_connection, init_database
-from core.processor import PipelineRunner, command_registry
+from core.pipeline import PipelineRunner
+from core.commands import command_registry
 from core.crypto import generate_keypair, sign
 
 

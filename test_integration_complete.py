@@ -68,7 +68,7 @@ def test_network_creation_full():
         api = API(protocol_dir, reset_db=True, db_path=db_path)
         
         # Get the runner from API and process envelopes
-        from core.processor import PipelineRunner
+        from core.pipeline import PipelineRunner
         runner = PipelineRunner(db_path=str(db_path), verbose=False)
         runner.run(
             protocol_dir=str(protocol_dir),

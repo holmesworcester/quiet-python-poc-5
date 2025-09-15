@@ -4,7 +4,7 @@ Integration tests for the full handler pipeline.
 import pytest
 import time
 from protocols.quiet.handlers.receive_from_network import ReceiveFromNetworkHandler
-from protocols.quiet.handlers.resolve_deps import ResolveDepsHandler
+from protocols.quiet.handlers.resolve_deps import handler as resolve_deps_handler, filter_func as resolve_deps_filter
 from protocols.quiet.handlers.transit_crypto import handler as transit_crypto_handler
 from protocols.quiet.handlers.remove import handler as remove_handler
 from protocols.quiet.handlers.event_crypto import handler as event_crypto_handler
@@ -12,7 +12,7 @@ from protocols.quiet.handlers.event_store import handler as event_store_handler
 from protocols.quiet.handlers.signature import handler as signature_handler
 from protocols.quiet.handlers.validate import ValidateHandler
 from protocols.quiet.handlers.resolve_deps import handler as unblock_deps_handler
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestPipelineIntegration(HandlerTestBase):
@@ -24,7 +24,7 @@ class TestPipelineIntegration(HandlerTestBase):
         
         # Initialize handlers that need instances
         self.receive_handler = ReceiveFromNetworkHandler()
-        self.resolve_deps_handler = ResolveDepsHandler()
+        self.resolve_deps_handler = None  # Handler functions used directly
         self.validate_handler = ValidateHandler()
         
         # Add test validator for identity events
@@ -63,7 +63,7 @@ class TestPipelineIntegration(HandlerTestBase):
         """, ("alice_peer_id", "alice_private_key"))
         self.db.commit()
         
-        results = self.resolve_deps_handler.process(envelope, self.db)
+        results = resolve_deps_handler(envelope, self.db)
         assert len(results) == 1
         envelope = results[0]
         assert envelope['deps_included_and_valid'] is True
@@ -128,7 +128,7 @@ class TestPipelineIntegration(HandlerTestBase):
         assert envelope['deps'] == [f"transit_key:{transit_key_id.hex()}"]
         
         # 2. Resolve transit key dependency
-        results = self.resolve_deps_handler.process(envelope, self.db)
+        results = resolve_deps_handler(envelope, self.db)
         assert len(results) == 1
         envelope = results[0]
         assert envelope['deps_included_and_valid'] is True
@@ -156,7 +156,7 @@ class TestPipelineIntegration(HandlerTestBase):
         """, ("bob_peer_id", "identity", 1000, 1))
         self.db.commit()
         
-        results = self.resolve_deps_handler.process(envelope, self.db)
+        results = resolve_deps_handler(envelope, self.db)
         assert len(results) == 1
         envelope = results[0]
         
@@ -185,7 +185,7 @@ class TestPipelineIntegration(HandlerTestBase):
         )
         
         # Try to resolve deps - will fail
-        results = self.resolve_deps_handler.process(blocked_envelope, self.db)
+        results = resolve_deps_handler(blocked_envelope, self.db)
         assert len(results) == 0  # Dropped due to missing deps
         
         # Process through unblock_deps to record blocking

@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import os
 from typing import Dict, Any, List
-from core.types import Envelope
+# Removed core.types import
 
 
 class HandlerTestBase:
@@ -100,7 +100,15 @@ class HandlerTestBase:
                 reason TEXT
             )
         """)
-        
+
+        # Deleted channels
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS deleted_channels (
+                channel_id TEXT PRIMARY KEY,
+                deleted_at INTEGER NOT NULL
+            )
+        """)
+
         self.db.commit()
     
     def _insert_test_data(self):
@@ -125,8 +133,8 @@ class HandlerTestBase:
         
         self.db.commit()
     
-    def create_envelope(self, **kwargs) -> Envelope:
+    def create_envelope(self, **kwargs: Any) -> dict[str, Any]:
         """Create a test envelope with given fields."""
-        envelope: Envelope = {}
+        envelope: dict[str, Any] = {}
         envelope.update(kwargs)
         return envelope

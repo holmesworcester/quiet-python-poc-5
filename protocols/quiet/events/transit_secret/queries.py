@@ -1,11 +1,14 @@
 """
 Queries for transit secret event type.
 """
+from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
+from core.queries import query
 
 
-def list_transit_keys(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
+@query
+def list(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """List all transit keys, optionally filtered by network_id."""
     network_id = params.get('network_id')
     

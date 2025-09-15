@@ -6,10 +6,11 @@ From plan.md:
 - Verify Filter: `event_plaintext` exists AND `sig_checked` is not true AND `deps_included_and_valid: true`
 - Transform: Signs events or verifies signatures
 """
-
-from core.types import Envelope
+from typing import Any, List
+import sqlite3
 import hashlib
 import json
+from core.handlers import Handler
 
 
 def canonicalize_event(event_plaintext: dict) -> bytes:
@@ -34,15 +35,23 @@ def canonicalize_event(event_plaintext: dict) -> bytes:
         return canonical_bytes.ljust(512, b'\0')
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that need signing or signature verification.
-    Key events (unsealed, not signed) are skipped.
+    Key events (unsealed, not signed) and identity events (local-only) are skipped.
     """
     # Skip key events - they are sealed, not signed
     if envelope.get('event_type') == 'key':
         return False
-    
+
+    # Skip identity events - they are local-only and don't need signing
+    if envelope.get('event_type') == 'identity':
+        return False
+
+    # Skip if already has a signature error
+    if envelope.get('sig_failed') or envelope.get('error'):
+        return False
+
     # Sign case: self-created events that need signing
     if (envelope.get('self_created') is True and
         envelope.get('deps_included_and_valid') is True and
@@ -50,25 +59,25 @@ def filter_func(envelope: Envelope) -> bool:
         event_plaintext = envelope['event_plaintext']
         if not event_plaintext.get('signature'):
             return True
-    
+
     # Verify case: events with plaintext that need sig checking
     if ('event_plaintext' in envelope and
         envelope.get('sig_checked') is not True and
         envelope.get('deps_included_and_valid') is True):
         return True
-    
+
     return False
 
 
-def handler(envelope: Envelope) -> Envelope:
+def handler(envelope: dict[str, Any]) -> dict[str, Any]:
     """
     Handle signing and signature verification.
     
     Args:
-        envelope: Envelope needing signature operations
+        envelope: dict[str, Any] needing signature operations
         
     Returns:
-        Envelope with signature added or sig_checked status
+        dict[str, Any] with signature added or sig_checked status
     """
     event_plaintext = envelope.get('event_plaintext', {})
     
@@ -81,14 +90,15 @@ def handler(envelope: Envelope) -> Envelope:
         return verify_signature(envelope)
 
 
-def sign_event(envelope: Envelope) -> Envelope:
+def sign_event(envelope: dict[str, Any]) -> dict[str, Any]:
     """Sign a self-created event."""
     # TODO: Implement actual signing logic
-    
+
     # Get identity from resolved_deps
     peer_id = envelope.get('peer_id') or envelope['event_plaintext'].get('peer_id')
     if not peer_id:
         envelope['error'] = "No peer_id for signing"
+        envelope['sig_failed'] = True  # Mark to prevent re-processing
         return envelope
     
     identity_dep = f"identity:{peer_id}"
@@ -118,7 +128,7 @@ def sign_event(envelope: Envelope) -> Envelope:
     return envelope
 
 
-def verify_signature(envelope: Envelope) -> Envelope:
+def verify_signature(envelope: dict[str, Any]) -> dict[str, Any]:
     """Verify signature on an event."""
     # TODO: Implement actual verification logic
     
@@ -159,3 +169,22 @@ def verify_signature(envelope: Envelope) -> Envelope:
     envelope['event_id'] = h.hexdigest()
     
     return envelope
+
+class SignatureHandler(Handler):
+    """Handler that signs self-created events and verifies signatures."""
+
+    @property
+    def name(self) -> str:
+        return "signature"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Process envelopes that need signing or signature verification."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Sign or verify signature on envelope."""
+        result = handler(envelope)
+        # Don't re-emit envelopes with signature errors
+        if result and not result.get('sig_failed'):
+            return [result]
+        return []

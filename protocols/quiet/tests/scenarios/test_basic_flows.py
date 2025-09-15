@@ -3,7 +3,7 @@ Basic flow scenario tests for Quiet protocol.
 """
 import pytest
 from .base import ScenarioTestBase
-from core.api_client import APIError
+from core.api import APIError
 
 
 class TestBasicFlows(ScenarioTestBase):
@@ -23,7 +23,7 @@ class TestBasicFlows(ScenarioTestBase):
         assert identity["created_at"] is not None
         
         # Verify identity appears in list
-        identities = alice.list_identities()
+        identities = alice.get_identities()
         assert len(identities) == 1
         assert identities[0]["peer_id"] == identity["identity_id"]
     
@@ -42,8 +42,8 @@ class TestBasicFlows(ScenarioTestBase):
         assert alice_id["network_id"] == bob_id["network_id"] == "shared-network"
         
         # Each client only sees their own identity
-        assert len(alice.list_identities()) == 1
-        assert len(bob.list_identities()) == 1
+        assert len(alice.get_identities()) == 1
+        assert len(bob.get_identities()) == 1
     
     def test_key_creation(self):
         """Test creating encryption keys for groups."""
@@ -152,7 +152,7 @@ class TestBasicFlows(ScenarioTestBase):
         assert key["key_id"] is not None
         
         # Verify all items exist
-        assert len(alice.list_identities()) == 1
+        assert len(alice.get_identities()) == 1
         assert len(alice.list_transit_keys()) == 1
         assert len(alice.list_keys()) == 1
     

@@ -6,11 +6,14 @@ From plan.md:
 - Validates: group_member_id matches user_id and group_id
 - Output Type: Same with `is_group_member: true`
 """
+from typing import Any, List
+import sqlite3
+from core.handlers import Handler
 
-from core.types import Envelope
+# Removed core.types import
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that have group_id in plaintext but haven't been checked for membership.
     """
@@ -21,15 +24,15 @@ def filter_func(envelope: Envelope) -> bool:
     )
 
 
-def handler(envelope: Envelope) -> Envelope:
+def handler(envelope: dict[str, Any]) -> dict[str, Any]:
     """
     Check if the event author is a valid member of the group.
     
     Args:
-        envelope: Envelope with event_plaintext containing group_id
+        envelope: dict[str, Any] with event_plaintext containing group_id
         
     Returns:
-        Envelope with is_group_member: true if valid, or error if not
+        dict[str, Any] with is_group_member: true if valid, or error if not
     """
     # TODO: Implement actual group membership validation
     # For now, stub implementation that approves all
@@ -52,3 +55,21 @@ def handler(envelope: Envelope) -> Envelope:
     # envelope['error'] = f"User {user_id} is not a member of group {group_id}"
     
     return envelope
+
+class MembershipCheckHandler(Handler):
+    """Handler for membership check."""
+
+    @property
+    def name(self) -> str:
+        return "membership_check"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Check if this handler should process the envelope."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Process the envelope."""
+        result = handler(envelope)
+        if result:
+            return [result]
+        return []

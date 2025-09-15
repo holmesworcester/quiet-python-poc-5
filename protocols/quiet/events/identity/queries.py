@@ -2,7 +2,32 @@
 Query functions for identity events.
 """
 from typing import Dict, Any, Optional, List
-from core.query import query, ReadOnlyConnection
+from core.db import ReadOnlyConnection
+from core.queries import query
+
+
+@query
+def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Get all identities."""
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT
+            identity_id,
+            network_id,
+            created_at
+        FROM identities
+        ORDER BY created_at DESC
+    """)
+
+    rows = cursor.fetchall()
+    result = []
+    for row in rows:
+        result.append({
+            "identity_id": row[0],
+            "network_id": row[1],
+            "created_at": row[2]
+        })
+    return result
 
 
 @query
@@ -14,7 +39,7 @@ def get_identity(db: ReadOnlyConnection, identity_id: str) -> Optional[Dict[str,
         FROM identities
         WHERE identity_id = ?
     """, (identity_id,))
-    
+
     row = cursor.fetchone()
     if row:
         return dict(row)
@@ -31,7 +56,7 @@ def get_identities_for_network(db: ReadOnlyConnection, network_id: str) -> List[
         WHERE network_id = ?
         ORDER BY created_at DESC
     """, (network_id,))
-    
+
     return [dict(row) for row in cursor.fetchall()]
 
 
@@ -44,7 +69,7 @@ def get_user_by_id(db: ReadOnlyConnection, user_id: str) -> Optional[Dict[str, A
         FROM users
         WHERE user_id = ?
     """, (user_id,))
-    
+
     row = cursor.fetchone()
     if row:
         return dict(row)
@@ -61,5 +86,5 @@ def get_users_for_network(db: ReadOnlyConnection, network_id: str) -> List[Dict[
         WHERE network_id = ?
         ORDER BY name
     """, (network_id,))
-    
+
     return [dict(row) for row in cursor.fetchall()]

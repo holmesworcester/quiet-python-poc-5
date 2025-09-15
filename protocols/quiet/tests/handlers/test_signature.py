@@ -5,7 +5,7 @@ import pytest
 from protocols.quiet.handlers.signature import (
     filter_func, handler, sign_event, verify_signature, canonicalize_event
 )
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestSignatureHandler(HandlerTestBase):

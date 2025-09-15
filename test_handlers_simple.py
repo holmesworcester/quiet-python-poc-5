@@ -5,7 +5,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from core.processor import PipelineRunner
+from core.pipeline import PipelineRunner
 from core.db import get_connection, init_database
 from protocols.quiet.handlers import (
     event_crypto_handler,

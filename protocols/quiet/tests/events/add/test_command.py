@@ -48,15 +48,13 @@ class TestAddCommand:
             "user_id": user_id,
             "identity_id": test_identity['identity_id'],
             "network_id": "test-network",
-            "private_key": test_identity['private_key']
         }
         
-        envelopes = create_add(params, initialized_db)
+        envelope = create_add(params)
         
         # Should emit exactly one envelope
-        assert len(envelopes) == 1
-        
-        envelope = envelopes[0]
+        # Single envelope returned
+
         assert "event_plaintext" in envelope
         assert "event_type" in envelope
         assert envelope["event_type"] == "add"
@@ -83,7 +81,7 @@ class TestAddCommand:
         }
         
         with pytest.raises(ValueError, match="group_id is required"):
-            create_add(params, initialized_db)
+            create_add(params)
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -96,7 +94,7 @@ class TestAddCommand:
         }
         
         with pytest.raises(ValueError, match="user_id is required"):
-            create_add(params, initialized_db)
+            create_add(params)
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -109,7 +107,7 @@ class TestAddCommand:
         }
         
         with pytest.raises(ValueError, match="identity_id is required"):
-            create_add(params, initialized_db)
+            create_add(params)
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -119,63 +117,10 @@ class TestAddCommand:
             "group_id": "some-group",
             "user_id": "some-user",
             "identity_id": "some-identity",
-            "private_key": b"dummy_key"
         }
         
         with pytest.raises(ValueError, match="network_id is required"):
-            create_add(params, initialized_db)
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_add_missing_private_key(self, initialized_db):
-        """Test that missing private_key raises error."""
-        params = {
-            "group_id": "some-group",
-            "user_id": "some-user",
-            "identity_id": "some-identity",
-            "network_id": "test-network"
-        }
-        
-        with pytest.raises(ValueError, match="private_key is required"):
-            create_add(params, initialized_db)
-    
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_add_signature_valid(self, initialized_db, test_identity):
-        """Test that the add event has a valid signature."""
-        # Mock user and group
-        user_private_key, user_public_key = generate_keypair()
-        user_id = user_public_key.hex()
-        group_id = "test-group-id-12345"
-        
-        # Add user to group
-        params = {
-            "group_id": group_id,
-            "user_id": user_id,
-            "identity_id": test_identity['identity_id'],
-            "network_id": "test-network",
-            "private_key": test_identity['private_key']
-        }
-        
-        envelopes = create_add(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
-        
-        # Remove signature from event for verification
-        signature_hex = event["signature"]
-        signature = bytes.fromhex(signature_hex)
-        
-        # Create the message that was signed
-        event_copy = event.copy()
-        del event_copy["signature"]
-        message = json.dumps(event_copy, sort_keys=True).encode()
-        
-        # Get public key from identity
-        public_key = test_identity['public_key']
-        
-        # Verify signature
-        assert verify(message, signature, public_key)
-    
+            create_add(params)
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -191,26 +136,24 @@ class TestAddCommand:
         group_id = "test-group-id-12345"
         
         # Add first user
-        envelopes1 = create_add({
+        envelope1 = create_add({
             "group_id": group_id,
             "user_id": user1_id,
             "identity_id": test_identity['identity_id'],
-            "network_id": "test-network",
-            "private_key": test_identity['private_key']
-        }, initialized_db)
-        
+            "network_id": "test-network"
+        })
+
         # Add second user
-        envelopes2 = create_add({
+        envelope2 = create_add({
             "group_id": group_id,
             "user_id": user2_id,
             "identity_id": test_identity['identity_id'],
-            "network_id": "test-network",
-            "private_key": test_identity['private_key']
-        }, initialized_db)
-        
+            "network_id": "test-network"
+        })
+
         # Should produce different events for different users
-        assert envelopes1[0]["event_plaintext"]["user_id"] == user1_id
-        assert envelopes2[0]["event_plaintext"]["user_id"] == user2_id
+        assert envelope1["event_plaintext"]["user_id"] == user1_id
+        assert envelope2["event_plaintext"]["user_id"] == user2_id
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -227,12 +170,10 @@ class TestAddCommand:
             "user_id": user_id,
             "identity_id": test_identity['identity_id'],
             "network_id": "test-network",
-            "private_key": test_identity['private_key']
         }
         
-        envelopes = create_add(params, initialized_db)
-        envelope = envelopes[0]
-        
+        envelope = create_add(params)
+
         # Required fields for pipeline
         assert envelope["event_type"] == "add"
         assert envelope["self_created"] == True

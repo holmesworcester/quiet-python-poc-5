@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 import tempfile
 import time
-from core.processor import PipelineRunner
+from core.pipeline import PipelineRunner
 from protocols.quiet.events.network.commands import create_network
 
 def main():

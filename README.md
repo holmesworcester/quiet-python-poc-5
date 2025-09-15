@@ -648,6 +648,43 @@ API requests include:
 
 ## Command Interface
 
+Commands accept parameters that mirror API requests and return envelopes for pipeline processing.
+
+### Command Response System
+
+Commands cannot predict the final event IDs because IDs are generated from the hash of signed events with dependencies. The pipeline processes commands through multiple handlers (resolve_deps, signature, event_store) before generating the final ID.
+
+After pipeline processing, the API returns a standard response shape containing:
+- `ids`: Mapping of event_type to event_id for events that were stored (only returns IDs for event types with exactly one event)
+- `data`: Optional query results that can be populated after the events are stored
+
+This design allows commands to remain pure functions that only create envelope structures, while the pipeline handles the complex processing of dependencies, signatures, and storage.
+
+### Multi-Event Commands and Placeholder Resolution
+
+When commands need to create multiple related events (e.g., `join_as_user` creates identity, peer, and user events), they use placeholders to handle cross-references between events that don't have IDs yet.
+
+**Placeholder Format**: `@generated:type:index` (e.g., `@generated:peer:0` refers to the first peer event)
+
+**Example**:
+```python
+# In join_as_user command:
+user_event = {
+    'type': 'user',
+    'peer_id': '@generated:peer:0',  # Placeholder for peer event's ID
+    'name': 'Alice',
+    ...
+}
+```
+
+**Pipeline Processing**:
+1. Separates events with placeholders from those without
+2. Processes non-placeholder events first (they get their IDs)
+3. Resolves placeholders by replacing them with actual IDs
+4. Processes placeholder events with resolved references
+
+This enables complex multi-event operations while keeping commands as pure functions.
+
 Commands accept parameters that mirror API requests:
 ```python
 # API-friendly parameters
@@ -689,6 +726,47 @@ Handlers define and maintain their own SQLite tables and indexes which can be us
 We have a protocol-defined event_store handler that stores `event_id`, `ciphertext`, `key_id`, `plaintext` for all events and emits envelopes with `stored:True` 
 
 # Testing
+
+## Command Testing Requirements
+
+All command tests must verify two aspects:
+
+### 1. Envelope Creation (Pure Function Test)
+Test that the command creates correct envelope structure:
+```python
+def test_envelope_creation(self):
+    # Call command directly as pure function
+    envelopes = create_message(params)
+
+    # Verify envelope structure
+    assert envelope['event_type'] == 'message'
+    assert envelope['self_created'] == True
+    assert 'deps' in envelope
+    # Check placeholders if multi-event command
+    assert envelope['event_plaintext']['peer_id'] == '@generated:peer:0'
+```
+
+### 2. API Response (Pipeline Integration Test)
+Test that the pipeline processes the command and returns correct IDs:
+```python
+def test_api_response(self):
+    # Run through pipeline
+    runner = PipelineRunner(db_path=':memory:')
+    result = runner.run('protocols/quiet', commands=[{
+        'name': 'create_message',
+        'params': params
+    }])
+
+    # Verify IDs are returned (proves pipeline worked)
+    assert 'message' in result
+    assert len(result['message']) == 32  # Blake2b hash
+```
+
+The API response test verifies:
+- Events were validated and stored
+- Placeholders were resolved (for multi-event commands)
+- Dependencies were satisfied
+- The entire pipeline executed successfully
 
 ## Pure Function Testing (No Database Access)
 

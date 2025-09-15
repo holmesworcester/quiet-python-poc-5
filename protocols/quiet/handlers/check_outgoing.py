@@ -8,11 +8,14 @@ From plan.md:
   - event_type is not a secret type (identity_secret, transit_secret, etc.)
 - Output Type: Same with `outgoing_checked: true`
 """
+from typing import Any, List
+import sqlite3
+from core.handlers import Handler
 
-from core.types import Envelope
+# Removed core.types import
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process outgoing envelopes that have dependencies resolved but haven't been checked.
     """
@@ -23,7 +26,7 @@ def filter_func(envelope: Envelope) -> bool:
     )
 
 
-def handler(envelope: Envelope) -> Envelope | None:
+def handler(envelope: dict[str, Any]) -> dict[str, Any] | None:
     """
     Validate outgoing envelope has consistent addressing and no secrets.
     
@@ -31,7 +34,7 @@ def handler(envelope: Envelope) -> Envelope | None:
         envelope: Outgoing envelope with resolved dependencies
         
     Returns:
-        Envelope with outgoing_checked: true if valid, error if not, or None to drop
+        dict[str, Any] with outgoing_checked: true if valid, error if not, or None to drop
     """
     # Check if this is a secret event type that shouldn't be sent
     event_type = envelope.get('event_type', '')
@@ -69,3 +72,21 @@ def handler(envelope: Envelope) -> Envelope | None:
     # envelope['error'] = "Address/peer/user mismatch in outgoing envelope"
     
     return envelope
+
+class CheckOutgoingHandler(Handler):
+    """Handler for check outgoing."""
+
+    @property
+    def name(self) -> str:
+        return "check_outgoing"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Check if this handler should process the envelope."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Process the envelope."""
+        result = handler(envelope)
+        if result:
+            return [result]
+        return []

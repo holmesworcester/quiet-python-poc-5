@@ -5,7 +5,7 @@ import pytest
 import json
 import time
 from protocols.quiet.handlers.resolve_deps import filter_func, handler
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestUnblockDepsHandler(HandlerTestBase):

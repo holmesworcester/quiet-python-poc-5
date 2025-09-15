@@ -6,11 +6,14 @@ From plan.md:
 - Encrypt Filter: `outgoing_checked: true` AND has `event_ciphertext` AND `transit_key_id`
 - Transform: Encrypts/decrypts transit layer
 """
+from typing import Any, List
+import sqlite3
+from core.handlers import Handler
 
-from core.types import Envelope
+# Removed core.types import
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that need transit encryption or decryption.
     """
@@ -30,12 +33,12 @@ def filter_func(envelope: Envelope) -> bool:
     return False
 
 
-def handler(envelope: Envelope) -> Envelope:
+def handler(envelope: dict[str, Any]) -> dict[str, Any]:
     """
     Handle transit layer encryption/decryption.
     
     Args:
-        envelope: Envelope needing transit crypto operations
+        envelope: dict[str, Any] needing transit crypto operations
         
     Returns:
         Transformed envelope
@@ -49,7 +52,7 @@ def handler(envelope: Envelope) -> Envelope:
         return encrypt_transit(envelope)
 
 
-def decrypt_transit(envelope: Envelope) -> Envelope:
+def decrypt_transit(envelope: dict[str, Any]) -> dict[str, Any]:
     """Decrypt transit layer to reveal event encryption layer."""
     # TODO: Implement actual decryption logic
     
@@ -97,7 +100,7 @@ def decrypt_transit(envelope: Envelope) -> Envelope:
     return envelope
 
 
-def encrypt_transit(envelope: Envelope) -> Envelope:
+def encrypt_transit(envelope: dict[str, Any]) -> dict[str, Any]:
     """Apply transit layer encryption to outgoing envelope."""
     # TODO: Implement actual transit encryption logic
     
@@ -122,7 +125,7 @@ def encrypt_transit(envelope: Envelope) -> Envelope:
     }
     
     # Create new envelope with only transit-layer data
-    transit_envelope: Envelope = {
+    transit_envelope: dict[str, Any] = {
         'transit_ciphertext': f"transit_encrypted:{transit_plaintext}".encode(),
         'transit_key_id': transit_key_id,
         'dest_ip': envelope.get('dest_ip', '127.0.0.1'),
@@ -131,3 +134,21 @@ def encrypt_transit(envelope: Envelope) -> Envelope:
     }
     
     return transit_envelope
+
+class TransitCryptoHandler(Handler):
+    """Handler for transit crypto."""
+
+    @property
+    def name(self) -> str:
+        return "transit_crypto"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Check if this handler should process the envelope."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Process the envelope."""
+        result = handler(envelope)
+        if result:
+            return [result]
+        return []

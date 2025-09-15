@@ -5,11 +5,11 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, cast
 import pytest
 import time
 
-from core.api_client import APIClient, APIError
+from core.api import API as APIClient, APIError
 
 
 class ScenarioTestBase:
@@ -41,7 +41,7 @@ class ScenarioTestBase:
         protocol_dir = Path(__file__).parent.parent.parent
         
         # Create client with specific database
-        client = APIClient(protocol_dir=str(protocol_dir), reset_db=reset_db)
+        client = APIClient(protocol_dir=protocol_dir, reset_db=reset_db)
         client.db_path = db_path
         
         self.clients[name] = client
@@ -52,13 +52,13 @@ class ScenarioTestBase:
         client = self.clients[client_name]
         identity = client.create_identity(network_id)
         self.identities[client_name] = identity
-        return identity
+        return cast(Dict[str, Any], identity)
     
-    def wait_for_sync(self, timeout: float = 0.1):
+    def wait_for_sync(self, timeout: float = 0.1) -> None:
         """Wait for events to propagate (simulated)."""
         time.sleep(timeout)
     
-    def assert_event_exists(self, client_name: str, event_type: str, **filters) -> Dict[str, Any]:
+    def assert_event_exists(self, client_name: str, event_type: str, **filters: Any) -> Dict[str, Any]:
         """Assert that an event exists in the client's database."""
         client = self.clients[client_name]
         db_state = client.dump_database()
@@ -81,9 +81,9 @@ class ScenarioTestBase:
                 matching_events.append(event)
         
         assert len(matching_events) > 0, f"No {event_type} event found with filters {filters}"
-        return matching_events[0]
+        return cast(Dict[str, Any], matching_events[0])
     
-    def assert_no_event(self, client_name: str, event_type: str, **filters):
+    def assert_no_event(self, client_name: str, event_type: str, **filters: Any) -> None:
         """Assert that no event exists matching the criteria."""
         client = self.clients[client_name]
         db_state = client.dump_database()
@@ -116,7 +116,7 @@ class ScenarioTestBase:
         
         return events
     
-    def share_event(self, from_client: str, to_client: str, event: Dict[str, Any]):
+    def share_event(self, from_client: str, to_client: str, event: Dict[str, Any]) -> None:
         """Simulate sharing an event from one client to another."""
         # In a real implementation, this would go through the network
         # For now, we'll directly insert into the receiving client's pipeline

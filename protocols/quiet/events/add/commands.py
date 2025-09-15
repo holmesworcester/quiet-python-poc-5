@@ -2,22 +2,34 @@
 Commands for add event type.
 """
 import time
-from typing import Dict, Any
-from core.types import Envelope, command
+import sqlite3
+from typing import Dict, Any, List
+from core.core_types import command, response_handler
 
 
 @command
-def create_add(params: Dict[str, Any]) -> Envelope:
+def create_add(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Add a user to a group.
     
     Returns an envelope with unsigned add event.
     """
-    # Extract parameters
+    # Extract and validate parameters
     group_id = params.get('group_id', '')
+    if not group_id:
+        raise ValueError("group_id is required")
+
     user_id = params.get('user_id', '')
+    if not user_id:
+        raise ValueError("user_id is required")
+
     identity_id = params.get('identity_id', '')
+    if not identity_id:
+        raise ValueError("identity_id is required")
+
     network_id = params.get('network_id', '')
+    if not network_id:
+        raise ValueError("network_id is required")
     
     # Create add event (unsigned)
     event: Dict[str, Any] = {
@@ -31,7 +43,7 @@ def create_add(params: Dict[str, Any]) -> Envelope:
     }
     
     # Create envelope
-    envelope: Envelope = {
+    envelope: dict[str, Any] = {
         'event_plaintext': event,
         'event_type': 'add',
         'self_created': True,
@@ -41,3 +53,38 @@ def create_add(params: Dict[str, Any]) -> Envelope:
     }
     
     return envelope
+
+
+@response_handler('create_add')
+def create_add_response(stored_ids: Dict[str, str], params: Dict[str, Any], db: sqlite3.Connection) -> Dict[str, Any]:
+    """
+    Response handler for create_add command.
+    Returns all group members including the newly added one.
+    """
+    group_id = params.get('group_id', '')
+
+    # Query all members of the group
+    cursor = db.execute("""
+        SELECT u.user_id, u.name, u.peer_id, u.created_at
+        FROM users u
+        JOIN group_members gm ON u.user_id = gm.user_id
+        WHERE gm.group_id = ?
+        ORDER BY u.created_at DESC
+    """, (group_id,))
+
+    members = []
+    for row in cursor:
+        members.append({
+            'user_id': row[0],
+            'name': row[1],
+            'peer_id': row[2],
+            'created_at': row[3]
+        })
+
+    # Return response matching OpenAPI spec
+    return {
+        'added': 'add' in stored_ids,
+        'group_id': group_id,
+        'members': members,
+        'member_count': len(members)
+    }

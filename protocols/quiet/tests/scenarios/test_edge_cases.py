@@ -3,7 +3,7 @@ Edge case scenario tests for Quiet protocol.
 """
 import pytest
 from .base import ScenarioTestBase
-from core.api_client import APIError
+from core.api import APIError
 
 
 class TestEdgeCases(ScenarioTestBase):
@@ -22,7 +22,7 @@ class TestEdgeCases(ScenarioTestBase):
         
         # Should have different IDs
         assert identity1["identity_id"] != identity2["identity_id"]
-        assert len(alice.list_identities()) == 2
+        assert len(alice.get_identities()) == 2
     
     def test_invalid_identity_reference(self):
         """Test operations with invalid identity references."""
@@ -202,7 +202,7 @@ class TestEdgeCases(ScenarioTestBase):
         alice2 = self.create_client("alice", reset_db=False)
         
         # Data should persist
-        identities = alice2.list_identities()
+        identities = alice2.get_identities()
         keys = alice2.list_keys()
         
         assert len(identities) >= 1

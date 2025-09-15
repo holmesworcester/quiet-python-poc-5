@@ -7,29 +7,31 @@ From plan.md:
 - Purge Function: Marks invalid events as purged while keeping event_id for duplicate detection
 """
 
-from core.types import Envelope
+# Removed core.types import
 import sqlite3
 import time
-from typing import Optional
+from typing import Dict, List, Optional, Any
+from core.handlers import Handler
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that need to be stored.
     """
-    return envelope.get('write_to_store') is True
+    # Only process if it needs storing AND hasn't been stored yet
+    return envelope.get('write_to_store') is True and envelope.get('stored') is not True
 
 
-def handler(envelope: Envelope, db: sqlite3.Connection) -> Envelope:
+def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, Any]:
     """
     Store event data in database.
     
     Args:
-        envelope: Envelope with write_to_store flag
+        envelope: dict[str, Any] with write_to_store flag
         db: Database connection
         
     Returns:
-        Envelope with stored: true
+        dict[str, Any] with stored: true
     """
     event_id = envelope.get('event_id')
     if not event_id:
@@ -132,3 +134,21 @@ def purge_event(event_id: str, db: sqlite3.Connection, reason: str = "validation
         db.rollback()
         print(f"Failed to purge event {event_id}: {e}")
         return False
+
+class EventStoreHandler(Handler):
+    """Handler for event store."""
+
+    @property
+    def name(self) -> str:
+        return "event_store"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Check if this handler should process the envelope."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Process the envelope."""
+        result = handler(envelope, db)
+        if result:
+            return [result]
+        return []

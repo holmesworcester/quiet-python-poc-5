@@ -4,33 +4,33 @@ Commands for network event type.
 import time
 from typing import Dict, Any, List
 from core.crypto import generate_keypair
-from core.types import Envelope, command
+from core.core_types import command
 
 
 @command 
-def create_network(params: Dict[str, Any]) -> List[Envelope]:
+def create_network(params: Dict[str, Any]) -> List[dict[str, Any]]:
     """
     Create a new network.
     
     Returns a list of envelopes with identity and network events.
     """
-    # Extract parameters
+    # Extract and validate parameters
     name = params.get('name', '')
-    description = params.get('description', '')
+    if not name:
+        raise ValueError("name is required")
     creator_name = params.get('creator_name', 'Network Creator')
-    
+
     # Generate keypair for network creator identity
     private_key, public_key = generate_keypair()
     creator_id = public_key.hex()
-    
+
     created_at = int(time.time() * 1000)
-    
+
     # Create network event (unsigned)
     network_event: Dict[str, Any] = {
         'type': 'network',
         'network_id': '',  # Will be filled by encrypt handler
         'name': name,
-        'description': description,
         'creator_id': creator_id,
         'created_at': created_at,
         'signature': ''  # Will be filled by sign handler
@@ -47,7 +47,7 @@ def create_network(params: Dict[str, Any]) -> List[Envelope]:
     }
     
     # Return both the identity and network event envelopes
-    envelopes: List[Envelope] = []
+    envelopes: List[dict[str, Any]] = []
     
     # Identity event MUST come first so it can be processed and store the signing key
     # before the network event needs to be signed

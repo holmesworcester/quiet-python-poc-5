@@ -3,7 +3,7 @@ Tests for receive_from_network handler.
 """
 import pytest
 from protocols.quiet.handlers.receive_from_network import ReceiveFromNetworkHandler
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestReceiveFromNetworkHandler(HandlerTestBase):
@@ -12,6 +12,10 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
     def setup_method(self):
         """Set up test handler."""
         super().setup_method()
+        from protocols.quiet.handlers.receive_from_network import ReceiveFromNetworkHandler
+        self.handler = ReceiveFromNetworkHandler()
+        self.filter_func = self.handler.filter
+        self.handler_func = self.handler.process
         self.handler = ReceiveFromNetworkHandler()
     
     def test_filter_accepts_network_data(self):
@@ -22,7 +26,7 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
             received_at=1234567890,
             raw_data=b"test_data"
         )
-        assert self.handler.filter(envelope) is True
+        assert self.filter_func(envelope) is True
     
     def test_filter_rejects_already_processed(self):
         """Test filter rejects envelopes already processed."""
@@ -33,7 +37,7 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
             raw_data=b"test_data",
             transit_key_id="already_set"
         )
-        assert self.handler.filter(envelope) is False
+        assert self.filter_func(envelope) is False
     
     def test_filter_rejects_missing_fields(self):
         """Test filter rejects envelopes missing required fields."""
@@ -43,7 +47,7 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
             origin_port=8080,
             received_at=1234567890
         )
-        assert self.handler.filter(envelope) is False
+        assert self.filter_func(envelope) is False
         
         # Missing origin_ip
         envelope = self.create_envelope(
@@ -51,7 +55,7 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
             received_at=1234567890,
             raw_data=b"test"
         )
-        assert self.handler.filter(envelope) is False
+        assert self.filter_func(envelope) is False
     
     def test_process_extracts_transit_info(self):
         """Test process extracts transit key ID and ciphertext."""
@@ -67,7 +71,7 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
             raw_data=raw_data
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         assert len(results) == 1
         result = results[0]
@@ -87,7 +91,7 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
             raw_data=b"short"  # Less than 33 bytes
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         assert len(results) == 0  # Should drop the envelope
     
@@ -102,7 +106,7 @@ class TestReceiveFromNetworkHandler(HandlerTestBase):
             raw_data=raw_data
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         assert len(results) == 1
         result = results[0]

@@ -5,7 +5,7 @@ import pytest
 from protocols.quiet.handlers.event_crypto import (
     filter_func, handler, unseal_key_event, decrypt_event, encrypt_event
 )
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestEventCryptoHandler(HandlerTestBase):

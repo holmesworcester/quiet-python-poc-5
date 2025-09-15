@@ -1,12 +1,14 @@
 """
 Validator for message events.
 """
-from core.types import Envelope, validator, validate_envelope_fields
+from typing import Any
+from core.core_types import validator
+from protocols.quiet.protocol_types import validate_envelope_fields
 from protocols.quiet.events import MessageEventData, validate_event_data
 
 
 @validator
-def validate(envelope: Envelope) -> bool:
+def validate(envelope: dict[str, Any]) -> bool:
     """
     Validate a message event.
     

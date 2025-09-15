@@ -12,14 +12,14 @@ protocol_dir = test_dir.parent.parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.events.message.queries import list_messages
+from protocols.quiet.events.message.queries import get as get_messages
 from protocols.quiet.events.message.commands import create_message
 from protocols.quiet.events.identity.commands import create_identity
 from protocols.quiet.events.network.commands import create_network
 from protocols.quiet.events.group.commands import create_group
 from protocols.quiet.events.channel.commands import create_channel
-from core.processor import process_envelope
-from core.handler import handle_command
+# from core.pipeline import PipelineRunner  # Use if needed
+# from core.handlers import handle_command  # Not needed
 
 
 class TestMessageQuery:
@@ -29,68 +29,63 @@ class TestMessageQuery:
     def setup_messages(self, initialized_db):
         """Create multiple messages for testing."""
         # Create identity
-        identity_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        process_envelope(identity_envelopes[0], initialized_db)
-        identity_id = identity_envelopes[0]["event_plaintext"]["peer_id"]
+        identity_envelope = create_identity({"network_id": "test-network"})
+        # Process through pipeline if needed
+        identity_id = identity_envelope["event_plaintext"]["peer_id"]
         
         # Create network
-        network_envelopes = create_network({
+        network_envelope, identity_envelope = create_network({
             "name": "Test Network",
             "identity_id": identity_id
-        }, initialized_db)
-        process_envelope(network_envelopes[0], initialized_db)
-        network_id = network_envelopes[0]["event_plaintext"]["network_id"]
+        })
+        # Process through pipeline if needed
+        network_id = network_envelope["event_plaintext"]["network_id"]
         
         # Create two groups
-        group1_envelopes = create_group({
+        group1_envelope = create_group({
             "name": "Group 1",
             "identity_id": identity_id,
             "network_id": network_id
-        }, initialized_db)
-        for envelope in group1_envelopes:
-            process_envelope(envelope, initialized_db)
-        group1_id = group1_envelopes[0]["event_plaintext"]["group_id"]
+        })
+        # Process through pipeline if needed
+        group1_id = group1_envelope["event_plaintext"]["group_id"]
         
-        group2_envelopes = create_group({
+        group2_envelope = create_group({
             "name": "Group 2",
             "identity_id": identity_id,
             "network_id": network_id
-        }, initialized_db)
-        for envelope in group2_envelopes:
-            process_envelope(envelope, initialized_db)
-        group2_id = group2_envelopes[0]["event_plaintext"]["group_id"]
+        })
+        # Process through pipeline if needed
+        group2_id = group2_envelope["event_plaintext"]["group_id"]
         
         # Create channels
-        channel1_envelopes = create_channel({
+        channel1_envelope = create_channel({
             "name": "general",
             "group_id": group1_id,
             "identity_id": identity_id
-        }, initialized_db)
-        process_envelope(channel1_envelopes[0], initialized_db)
-        channel1_id = channel1_envelopes[0]["event_plaintext"]["channel_id"]
+        })
+        # Process through pipeline if needed
+        channel1_id = channel1_envelope["event_plaintext"]["channel_id"]
         
-        channel2_envelopes = create_channel({
+        channel2_envelope = create_channel({
             "name": "random",
             "group_id": group2_id,
             "identity_id": identity_id
-        }, initialized_db)
-        process_envelope(channel2_envelopes[0], initialized_db)
-        channel2_id = channel2_envelopes[0]["event_plaintext"]["channel_id"]
+        })
+        # Process through pipeline if needed
+        channel2_id = channel2_envelope["event_plaintext"]["channel_id"]
         
         messages_created = []
         
         # Create messages in channel 1
         for i in range(5):
-            # Use handle_command to go through full pipeline
-            result = handle_command(
-                'create_message',
-                {
-                    "content": f"Message {i} in channel 1",
-                    "channel_id": channel1_id,
-                    "identity_id": identity_id
-                },
-                initialized_db
-            )
+            # Create message directly
+            from protocols.quiet.events.message.commands import create_message
+            result = create_message({
+                "content": f"Message {i} in channel 1",
+                "channel_id": channel1_id,
+                "identity_id": identity_id
+            })
             time.sleep(0.01)  # Ensure different timestamps
             messages_created.append({
                 "content": f"Message {i} in channel 1",
@@ -100,15 +95,11 @@ class TestMessageQuery:
         
         # Create messages in channel 2
         for i in range(3):
-            result = handle_command(
-                'create_message',
-                {
-                    "content": f"Message {i} in channel 2",
-                    "channel_id": channel2_id,
-                    "identity_id": identity_id
-                },
-                initialized_db
-            )
+            result = create_message({
+                "content": f"Message {i} in channel 2",
+                "channel_id": channel2_id,
+                "identity_id": identity_id
+            })
             time.sleep(0.01)
             messages_created.append({
                 "content": f"Message {i} in channel 2",
@@ -130,7 +121,7 @@ class TestMessageQuery:
     @pytest.mark.event_type
     def test_list_all_messages(self, initialized_db, setup_messages):
         """Test listing all messages without filters."""
-        messages = list_messages({}, initialized_db)
+        messages = get_messages(initialized_db, {})
         
         assert len(messages) == 8  # 5 + 3 messages
         
@@ -145,14 +136,14 @@ class TestMessageQuery:
         data = setup_messages
         
         # List messages in channel 1
-        messages = list_messages({"channel_id": data["channel1_id"]}, initialized_db)
+        messages = get_messages(initialized_db, {"channel_id": data["channel1_id"]})
         assert len(messages) == 5
         for message in messages:
             assert message["channel_id"] == data["channel1_id"]
             assert "channel 1" in message["content"]
         
         # List messages in channel 2
-        messages = list_messages({"channel_id": data["channel2_id"]}, initialized_db)
+        messages = get_messages(initialized_db, {"channel_id": data["channel2_id"]})
         assert len(messages) == 3
         for message in messages:
             assert message["channel_id"] == data["channel2_id"]
@@ -165,13 +156,13 @@ class TestMessageQuery:
         data = setup_messages
         
         # List messages in group 1
-        messages = list_messages({"group_id": data["group1_id"]}, initialized_db)
+        messages = get_messages(initialized_db, {"group_id": data["group1_id"]})
         assert len(messages) == 5
         for message in messages:
             assert message["group_id"] == data["group1_id"]
         
         # List messages in group 2
-        messages = list_messages({"group_id": data["group2_id"]}, initialized_db)
+        messages = get_messages(initialized_db, {"group_id": data["group2_id"]})
         assert len(messages) == 3
         for message in messages:
             assert message["group_id"] == data["group2_id"]
@@ -180,7 +171,7 @@ class TestMessageQuery:
     @pytest.mark.event_type
     def test_list_messages_with_limit(self, initialized_db, setup_messages):
         """Test limiting number of messages returned."""
-        messages = list_messages({"limit": 3}, initialized_db)
+        messages = get_messages(initialized_db, {"limit": 3})
         
         assert len(messages) == 3
         
@@ -194,15 +185,15 @@ class TestMessageQuery:
     def test_list_messages_with_offset(self, initialized_db, setup_messages):
         """Test pagination with offset."""
         # Get first page
-        page1 = list_messages({"limit": 3, "offset": 0}, initialized_db)
+        page1 = get_messages(initialized_db, {"limit": 3, "offset": 0})
         assert len(page1) == 3
         
         # Get second page
-        page2 = list_messages({"limit": 3, "offset": 3}, initialized_db)
+        page2 = get_messages(initialized_db, {"limit": 3, "offset": 3})
         assert len(page2) == 3
         
         # Get third page (partial)
-        page3 = list_messages({"limit": 3, "offset": 6}, initialized_db)
+        page3 = get_messages(initialized_db, {"limit": 3, "offset": 6})
         assert len(page3) == 2  # Only 2 messages left
         
         # No overlap between pages
@@ -219,10 +210,10 @@ class TestMessageQuery:
         """Test combining channel filter with limit."""
         data = setup_messages
         
-        messages = list_messages({
+        messages = get_messages(initialized_db, {
             "channel_id": data["channel1_id"],
             "limit": 2
-        }, initialized_db)
+        })
         
         assert len(messages) == 2
         for message in messages:
@@ -234,7 +225,7 @@ class TestMessageQuery:
         """Test that default limit is 100."""
         # Create more than 100 messages would be expensive, 
         # so we'll just verify the default is applied
-        messages = list_messages({}, initialized_db)
+        messages = get_messages(initialized_db, {})
         
         # We have 8 messages, all should be returned with default limit
         assert len(messages) == 8
@@ -243,24 +234,24 @@ class TestMessageQuery:
     @pytest.mark.event_type
     def test_list_messages_empty_result(self, initialized_db):
         """Test that empty database returns empty list."""
-        messages = list_messages({}, initialized_db)
+        messages = get_messages(initialized_db, {})
         assert messages == []
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_list_messages_nonexistent_filters(self, initialized_db, setup_messages):
         """Test filtering with non-existent IDs returns empty."""
-        messages = list_messages({"channel_id": "nonexistent-channel"}, initialized_db)
+        messages = get_messages(initialized_db, {"channel_id": "nonexistent-channel"})
         assert messages == []
         
-        messages = list_messages({"group_id": "nonexistent-group"}, initialized_db)
+        messages = get_messages(initialized_db, {"group_id": "nonexistent-group"})
         assert messages == []
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_list_messages_returns_all_fields(self, initialized_db, setup_messages):
         """Test that query returns all message fields."""
-        messages = list_messages({"limit": 1}, initialized_db)
+        messages = get_messages(initialized_db, {"limit": 1})
         
         assert len(messages) > 0
         message = messages[0]
@@ -280,7 +271,7 @@ class TestMessageQuery:
         """Test that messages are returned in chronological order."""
         data = setup_messages
         
-        messages = list_messages({"channel_id": data["channel1_id"]}, initialized_db)
+        messages = get_messages(initialized_db, {"channel_id": data["channel1_id"]})
         
         # Messages should be in order: Message 0, Message 1, Message 2, etc.
         for i in range(len(messages)):
@@ -290,5 +281,5 @@ class TestMessageQuery:
     @pytest.mark.event_type
     def test_list_messages_large_offset(self, initialized_db, setup_messages):
         """Test offset larger than total messages."""
-        messages = list_messages({"offset": 100}, initialized_db)
+        messages = get_messages(initialized_db, {"offset": 100})
         assert messages == []

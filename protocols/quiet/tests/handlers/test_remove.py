@@ -5,7 +5,7 @@ import pytest
 from protocols.quiet.handlers.remove import (
     filter_func, handler, is_explicitly_deleted, get_removal_context, get_remover
 )
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestRemoveHandler(HandlerTestBase):

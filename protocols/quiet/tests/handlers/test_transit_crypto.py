@@ -3,7 +3,7 @@ Tests for transit_crypto handler.
 """
 import pytest
 from protocols.quiet.handlers.transit_crypto import filter_func, handler, decrypt_transit, encrypt_transit
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestTransitCryptoHandler(HandlerTestBase):

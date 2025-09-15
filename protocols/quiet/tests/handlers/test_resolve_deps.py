@@ -10,48 +10,48 @@ protocol_dir = Path(__file__).parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.handlers.resolve_deps.handler import ResolveDepsHandler
+from protocols.quiet.handlers.resolve_deps import filter_func, handler
 
 
 class TestResolveDepsHandler:
     """Test dependency resolution handler."""
-    
+
     @pytest.fixture
-    def handler(self):
-        """Create handler instance."""
-        return ResolveDepsHandler()
+    def resolve_filter(self):
+        """Get filter function."""
+        return filter_func
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_filter_no_deps_included_and_valid(self, handler):
+    def test_filter_no_deps_included_and_valid(self, resolve_filter):
         """Test filter matches envelopes without deps_included_and_valid."""
         envelope = {
             "event_type": "test",
             "event_plaintext": {"type": "test"}
         }
-        assert handler.filter(envelope) == True
+        assert resolve_filter(envelope) == True
         
         envelope_with_false = {
             "event_type": "test", 
             "event_plaintext": {"type": "test"},
             "deps_included_and_valid": False
         }
-        assert handler.filter(envelope_with_false) == True
+        assert resolve_filter(envelope_with_false) == True
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_filter_with_deps_valid(self, handler):
+    def test_filter_with_deps_valid(self, resolve_filter):
         """Test filter rejects envelopes with deps already valid."""
         envelope = {
             "event_type": "test",
             "event_plaintext": {"type": "test"},
             "deps_included_and_valid": True
         }
-        assert handler.filter(envelope) == False
+        assert resolve_filter(envelope) == False
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_filter_unblocked(self, handler):
+    def test_filter_unblocked(self, resolve_filter):
         """Test filter matches unblocked envelopes."""
         envelope = {
             "event_type": "test",
@@ -59,11 +59,11 @@ class TestResolveDepsHandler:
             "deps_included_and_valid": True,
             "unblocked": True
         }
-        assert handler.filter(envelope) == True
+        assert resolve_filter(envelope) == True
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_process_identity_no_deps(self, handler, sample_identity_event, initialized_db):
+    def test_process_identity_no_deps(self, resolve_filter, sample_identity_event, initialized_db):
         """Test processing identity event with no dependencies."""
         envelope = {
             "event_plaintext": sample_identity_event,
@@ -71,7 +71,7 @@ class TestResolveDepsHandler:
             "peer_id": sample_identity_event["peer_id"]
         }
         
-        results = handler.process(envelope, initialized_db)
+        results = handler(envelope, initialized_db)
         
         assert len(results) == 1
         result = results[0]
@@ -89,7 +89,7 @@ class TestResolveDepsHandler:
             "event_type": "key"
         }
         
-        results = handler.process(envelope, initialized_db)
+        results = handler(envelope, initialized_db)
         
         assert len(results) == 1
         result = results[0]
@@ -122,7 +122,7 @@ class TestResolveDepsHandler:
             "event_type": "key"
         }
         
-        results = handler.process(envelope, initialized_db)
+        results = handler(envelope, initialized_db)
         
         assert len(results) == 1
         result = results[0]
@@ -143,7 +143,7 @@ class TestResolveDepsHandler:
             "custom_field": "preserved"
         }
         
-        results = handler.process(envelope, initialized_db)
+        results = handler(envelope, initialized_db)
         result = results[0]
         
         # Original fields should be preserved

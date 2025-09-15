@@ -1,11 +1,14 @@
 """
 Queries for user event type.
 """
+from core.db import ReadOnlyConnection
 from typing import Dict, Any, List, Optional
 import sqlite3
+from core.queries import query
 
 
-def list_users(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
+@query
+def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     List all users in a network.
     
@@ -42,7 +45,8 @@ def list_users(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str,
     return users
 
 
-def get_user(params: Dict[str, Any], db: sqlite3.Connection) -> Optional[Dict[str, Any]]:
+@query
+def get_user(db: ReadOnlyConnection, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Get a specific user by ID.
     
@@ -68,7 +72,8 @@ def get_user(params: Dict[str, Any], db: sqlite3.Connection) -> Optional[Dict[st
     return dict(row) if row else None
 
 
-def get_user_by_peer_id(params: Dict[str, Any], db: sqlite3.Connection) -> Optional[Dict[str, Any]]:
+@query
+def get_user_by_peer_id(db: ReadOnlyConnection, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Get a user by their peer ID in a specific network.
     
@@ -98,7 +103,8 @@ def get_user_by_peer_id(params: Dict[str, Any], db: sqlite3.Connection) -> Optio
     return dict(row) if row else None
 
 
-def count_users(params: Dict[str, Any], db: sqlite3.Connection) -> int:
+@query
+def count_users(db: ReadOnlyConnection, params: Dict[str, Any]) -> int:
     """
     Count users in a network.
     
@@ -122,7 +128,8 @@ def count_users(params: Dict[str, Any], db: sqlite3.Connection) -> int:
     return row['count'] if row else 0
 
 
-def is_user_in_network(params: Dict[str, Any], db: sqlite3.Connection) -> bool:
+@query
+def is_user_in_network(db: ReadOnlyConnection, params: Dict[str, Any]) -> bool:
     """
     Check if a peer has joined a network as a user.
     

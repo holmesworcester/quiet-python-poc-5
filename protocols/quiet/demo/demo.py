@@ -295,23 +295,32 @@ class QuietDemoCore:
                 "name": name,
                 "creator_name": panel.identity_name or f"User-{panel_id}"
             })
-            
-            if result["success"]:
+
+            # Check if command succeeded by checking for 'ids' key
+            if result and "ids" in result:
                 self.refresh_state(force=True)
-                # Get data from the network event result
-                network_id = result["data"].get("network_id")
-                creator_id = result["data"].get("creator_id")
-                
-                # If no creator_id in the first envelope, look for it in identities
-                if not creator_id:
-                    identities = self.get_identities()
-                    # Find the most recent identity for this network
-                    network_identities = [i for i in identities if i.get('network_id') == network_id]
-                    if network_identities:
-                        creator_id = network_identities[-1]['identity_id']
-                
-                if not network_id:
-                    return CommandResult(False, error="Failed to get network ID from result")
+
+                # Get the network event ID - it's stored but we need to query for the actual network
+                network_event_id = result["ids"].get("network")
+
+                # Query the database to get the actual network details
+                db_dump = self.get_database_dump()
+                networks = db_dump.get('networks', [])
+                identities = db_dump.get('identities', [])
+
+                # Find the network that was just created (most recent)
+                if networks:
+                    network = networks[-1]  # Get the most recent network
+                    network_id = network.get('network_id', '')
+                    creator_id = network.get('creator_id')
+                else:
+                    return CommandResult(False, error="Network was not created properly")
+
+                # If no creator_id in network, look for it in identities
+                if not creator_id and identities:
+                    # Find the most recent identity
+                    creator_id = identities[-1].get('identity_id')
+
                 if not creator_id:
                     return CommandResult(False, error="Failed to get creator identity from result")
                 

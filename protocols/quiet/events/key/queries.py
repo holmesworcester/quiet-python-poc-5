@@ -1,11 +1,14 @@
 """
 Queries for key event type.
 """
+from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
+from core.queries import query
 
 
-def list_keys(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
+@query
+def list(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """List all keys, optionally filtered by group_id."""
     group_id = params.get('group_id')
     

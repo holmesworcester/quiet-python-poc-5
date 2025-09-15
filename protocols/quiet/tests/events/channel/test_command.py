@@ -27,29 +27,12 @@ class TestChannelCommand:
         """Create identity, network, and group for channel tests."""
         # Create identity
         identity_envelope = create_identity({"network_id": "test-network"})
-        process_envelope(identity_envelope, initialized_db)
         identity_id = identity_envelope["event_plaintext"]["peer_id"]
-        
-        # Create network
-        network_params = {
-            "name": "Test Network",
-            "identity_id": identity_id
-        }
-        network_envelopes = create_network(network_params, initialized_db)
-        process_envelope(network_envelopes[0], initialized_db)
-        network_id = network_envelopes[0]["event_plaintext"]["network_id"]
-        
-        # Create group
-        group_params = {
-            "name": "Test Group",
-            "identity_id": identity_id,
-            "network_id": network_id
-        }
-        group_envelopes = create_group(group_params, initialized_db)
-        for envelope in group_envelopes:
-            process_envelope(envelope, initialized_db)
-        group_id = group_envelopes[0]["event_plaintext"]["group_id"]
-        
+
+        # Use mock IDs since commands don't generate them
+        network_id = "test-network-id"
+        group_id = "test-group-id"
+
         return identity_id, network_id, group_id
     
     @pytest.mark.unit
@@ -62,20 +45,19 @@ class TestChannelCommand:
             "name": "general",
             "group_id": group_id,
             "identity_id": identity_id,
+            "network_id": network_id,
         }
-        
-        envelopes = create_channel(params, initialized_db)
+
+        envelope = create_channel(params)
         
         # Should emit exactly one envelope
-        assert len(envelopes) == 1
-        
-        envelope = envelopes[0]
+        # Single envelope returned
+
         assert envelope["event_type"] == "channel"
         assert envelope["self_created"] == True
         assert envelope["peer_id"] == identity_id
         assert envelope["network_id"] == network_id
-        assert envelope["group_id"] == group_id
-        assert envelope["deps"] == [group_id]
+        assert envelope["deps"] == [f"group:{group_id}"]
         
         # Check event content
         event = envelope["event_plaintext"]
@@ -84,78 +66,22 @@ class TestChannelCommand:
         assert event["group_id"] == group_id
         assert event["network_id"] == network_id
         assert event["creator_id"] == identity_id
-        assert "channel_id" in event
+        assert event["channel_id"] == ""  # Empty until handlers process
         assert "created_at" in event
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_channel_missing_params(self):
-        """Test that missing required params raise errors."""
-        # Missing name
-        with pytest.raises(ValueError, match="name, group_id, and identity_id are required"):
-            create_channel({"group_id": "test-group", "identity_id": "test-id"})
-        
-        # Missing group_id
-        with pytest.raises(ValueError, match="name, group_id, and identity_id are required"):
-            create_channel({"name": "general", "identity_id": "test-id"})
-        
-        # Missing identity_id
-        with pytest.raises(ValueError, match="name, group_id, and identity_id are required"):
-            create_channel({"name": "general", "group_id": "test-group"})
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_channel_invalid_identity(self):
-        """Test that invalid identity raises error."""
-        params = {
-            "name": "general",
-            "group_id": "test-group",
-            "identity_id": "non-existent-identity"
-        }
-        
-        with pytest.raises(ValueError, match="Identity not found"):
-            create_channel(params, initialized_db)
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_channel_not_group_member(self, initialized_db, setup_network_and_identity):
-        """Test that non-group members cannot create channels."""
-        identity_id, network_id, _ = setup_network_and_identity
-        
-        # Create a different group the user is not a member of
-        group_params = {
-            "name": "Other Group",
-            "identity_id": identity_id,
-            "network_id": network_id
-        }
-        group_envelopes = create_group(group_params, initialized_db)
-        other_group_id = group_envelopes[0]["event_plaintext"]["group_id"]
-        
-        # Don't process the group events, so user won't be added as member
-        
-        params = {
-            "name": "general",
-            "group_id": other_group_id,
-            "identity_id": identity_id
-        }
-        
-        with pytest.raises(ValueError, match="User is not a member of the group"):
-            create_channel(params, initialized_db)
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_channel_invalid_group(self, initialized_db, setup_network_and_identity):
-        """Test that invalid group raises error."""
-        identity_id, _, _ = setup_network_and_identity
-        
-        params = {
-            "name": "general",
-            "group_id": "non-existent-group",
-            "identity_id": identity_id
-        }
-        
-        with pytest.raises(ValueError, match="User is not a member of the group"):
-            create_channel(params, initialized_db)
+        """Test that commands work with missing params (no validation)."""
+        # Commands don't validate - they just use defaults
+        envelope = create_channel({"group_id": "test-group", "identity_id": "test-id"})
+        assert envelope["event_plaintext"]["name"] == ""  # Empty default
+
+        envelope = create_channel({"name": "general", "identity_id": "test-id"})
+        assert envelope["event_plaintext"]["group_id"] == ""  # Empty default
+
+        envelope = create_channel({"name": "general", "group_id": "test-group"})
+        assert envelope["event_plaintext"]["creator_id"] == ""  # Empty default
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -167,57 +93,63 @@ class TestChannelCommand:
         params1 = {
             "name": "general",
             "group_id": group_id,
-            "identity_id": identity_id
+            "identity_id": identity_id,
+            "network_id": network_id
         }
-        envelopes1 = create_channel(params1)
-        channel_id1 = envelopes1[0]["event_plaintext"]["channel_id"]
-        
+        envelope1 = create_channel(params1)
+
         # Create second channel
         params2 = {
             "name": "random",
             "group_id": group_id,
-            "identity_id": identity_id
+            "identity_id": identity_id,
+            "network_id": network_id
         }
-        envelopes2 = create_channel(params2)
-        channel_id2 = envelopes2[0]["event_plaintext"]["channel_id"]
-        
-        # Should have different channel IDs
-        assert channel_id1 != channel_id2
+        envelope2 = create_channel(params2)
+
+        # Both have empty IDs until handlers process
+        assert envelope1["event_plaintext"]["channel_id"] == ""
+        assert envelope2["event_plaintext"]["channel_id"] == ""
+        # But different names
+        assert envelope1["event_plaintext"]["name"] != envelope2["event_plaintext"]["name"]
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_channel_deterministic_id(self, initialized_db, setup_network_and_identity):
-        """Test that channel ID is deterministic based on inputs."""
-        identity_id, _, group_id = setup_network_and_identity
-        
+        """Test that channels have different timestamps."""
+        identity_id, network_id, group_id = setup_network_and_identity
+
         # Create channel with specific timestamp
         params = {
             "name": "general",
             "group_id": group_id,
-            "identity_id": identity_id
+            "identity_id": identity_id,
+            "network_id": network_id
         }
-        
-        # Two channels created at different times should have different IDs
-        envelopes1 = create_channel(params, initialized_db)
+
+        # Two channels created at different times should have different timestamps
+        envelope1 = create_channel(params)
         time.sleep(0.01)  # Small delay to ensure different timestamp
-        envelopes2 = create_channel(params, initialized_db)
-        
-        assert envelopes1[0]["event_plaintext"]["channel_id"] != envelopes2[0]["event_plaintext"]["channel_id"]
+        envelope2 = create_channel(params)
+
+        # IDs are empty until handlers, but timestamps differ
+        assert envelope1["event_plaintext"]["created_at"] != envelope2["event_plaintext"]["created_at"]
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_channel_empty_description(self, initialized_db, setup_network_and_identity):
         """Test creating channel without description."""
-        identity_id, _, group_id = setup_network_and_identity
-        
+        identity_id, network_id, group_id = setup_network_and_identity
+
         params = {
             "name": "general",
             "group_id": group_id,
-            "identity_id": identity_id
+            "identity_id": identity_id,
+            "network_id": network_id
         }
-        
-        envelopes = create_channel(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
+
+        envelope = create_channel(params)
+        event = envelope["event_plaintext"]
         
         # No description field for channels
         assert "description" not in event

@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS groups (
 CREATE TABLE IF NOT EXISTS group_members (
     group_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    added_by TEXT NOT NULL,
-    added_at INTEGER NOT NULL,
+    joined_at INTEGER NOT NULL,
     PRIMARY KEY (group_id, user_id)
 );

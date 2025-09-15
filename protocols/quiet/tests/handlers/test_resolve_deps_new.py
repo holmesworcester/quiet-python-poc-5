@@ -3,8 +3,8 @@ Tests for resolve_deps handler with new implementation.
 """
 import pytest
 import json
-from protocols.quiet.handlers.resolve_deps import ResolveDepsHandler
-from .test_base import HandlerTestBase
+from protocols.quiet.handlers.resolve_deps import handler as resolve_deps_handler, filter_func as resolve_deps_filter, parse_dep_ref
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestResolveDepsHandler(HandlerTestBase):
@@ -13,7 +13,8 @@ class TestResolveDepsHandler(HandlerTestBase):
     def setup_method(self):
         """Set up test handler."""
         super().setup_method()
-        self.handler = ResolveDepsHandler()
+        self.handler_func = resolve_deps_handler
+        self.filter_func = resolve_deps_filter
     
     def test_filter_accepts_needs_resolution(self):
         """Test filter accepts envelopes that need dependency resolution."""
@@ -22,14 +23,14 @@ class TestResolveDepsHandler(HandlerTestBase):
             deps=["identity:test_peer_id"],
             deps_included_and_valid=False
         )
-        assert self.handler.filter(envelope) is True
+        assert self.filter_func(envelope) is True
         
         # Unblocked event
         envelope = self.create_envelope(
             deps=["key:test_key"],
             unblocked=True
         )
-        assert self.handler.filter(envelope) is True
+        assert self.filter_func(envelope) is True
     
     def test_filter_rejects_already_resolved(self):
         """Test filter rejects envelopes with resolved deps."""
@@ -37,14 +38,14 @@ class TestResolveDepsHandler(HandlerTestBase):
             deps=["identity:test_peer_id"],
             deps_included_and_valid=True
         )
-        assert self.handler.filter(envelope) is False
+        assert self.filter_func(envelope) is False
     
     def test_filter_rejects_no_deps(self):
         """Test filter rejects envelopes without deps array."""
         envelope = self.create_envelope(
             deps_included_and_valid=False
         )
-        assert self.handler.filter(envelope) is False
+        assert self.filter_func(envelope) is False
     
     def test_process_no_deps_needed(self):
         """Test processing envelope with empty deps array."""
@@ -53,7 +54,7 @@ class TestResolveDepsHandler(HandlerTestBase):
             event_id="test_event"
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         assert len(results) == 1
         result = results[0]
@@ -74,7 +75,7 @@ class TestResolveDepsHandler(HandlerTestBase):
             event_id="test_event"
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         assert len(results) == 1
         result = results[0]
@@ -96,7 +97,7 @@ class TestResolveDepsHandler(HandlerTestBase):
             event_id="test_event"
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         assert len(results) == 1
         result = results[0]
@@ -116,7 +117,7 @@ class TestResolveDepsHandler(HandlerTestBase):
             event_id="test_event"
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         # Should return empty list (drops envelope)
         assert len(results) == 0
@@ -136,7 +137,7 @@ class TestResolveDepsHandler(HandlerTestBase):
             event_id="test_event"
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         # Should drop envelope if any deps missing
         assert len(results) == 0
@@ -149,23 +150,23 @@ class TestResolveDepsHandler(HandlerTestBase):
             retry_count=5
         )
         
-        results = self.handler.process(envelope, self.db)
+        results = self.handler_func(envelope, self.db)
         
         assert len(results) == 0  # Dropped due to missing deps
     
     def test_parse_dep_ref(self):
         """Test dependency reference parsing."""
         # With prefix
-        dep_type, dep_id = self.handler._parse_dep_ref("identity:abc123")
+        dep_type, dep_id = parse_dep_ref("identity:abc123")
         assert dep_type == "identity"
         assert dep_id == "abc123"
         
         # Without prefix (defaults to event)
-        dep_type, dep_id = self.handler._parse_dep_ref("xyz789")
+        dep_type, dep_id = parse_dep_ref("xyz789")
         assert dep_type == "event"
         assert dep_id == "xyz789"
         
         # With colon in ID
-        dep_type, dep_id = self.handler._parse_dep_ref("key:group:main")
+        dep_type, dep_id = parse_dep_ref("key:group:main")
         assert dep_type == "key"
         assert dep_id == "group:main"

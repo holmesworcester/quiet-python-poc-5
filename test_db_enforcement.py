@@ -4,7 +4,7 @@ Test that database access enforcement works correctly.
 """
 import sqlite3
 from core.types import command, validator, projector
-from core.query import query
+from core.queries import query
 from core.db import ReadOnlyConnection
 
 

@@ -19,7 +19,6 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
             'data': {
                 'network_id': event_data['network_id'],
                 'name': event_data['name'],
-                'description': event_data.get('description', ''),
                 'creator_id': event_data['creator_id'],
                 'created_at': event_data['created_at']
             }

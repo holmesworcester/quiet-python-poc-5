@@ -25,8 +25,8 @@ class TestKeyCommand:
         """Create an identity in the database for testing."""
         # Create identity
         params = {"network_id": "test-network"}
-        envelopes = create_identity(params, initialized_db)
-        identity_id = envelopes[0]["event_plaintext"]["peer_id"]
+        envelope = create_identity(params)
+        identity_id = envelope["event_plaintext"]["peer_id"]
         
         return {
             "identity_id": identity_id,
@@ -43,12 +43,11 @@ class TestKeyCommand:
             "identity_id": identity_in_db["identity_id"]
         }
         
-        envelopes = create_key(params, initialized_db)
+        envelope = create_key(params)
         
         # Should emit exactly one envelope
-        assert len(envelopes) == 1
-        
-        envelope = envelopes[0]
+        # Single envelope returned
+
         assert "event_plaintext" in envelope
         assert "event_type" in envelope
         assert envelope["event_type"] == "key"
@@ -60,87 +59,63 @@ class TestKeyCommand:
         assert event["group_id"] == "test-group"
         assert event["network_id"] == "test-network"
         assert event["peer_id"] == identity_in_db["identity_id"]
-        assert "key_id" in event
+        assert event["key_id"] == ""  # Empty until handlers process
         assert "sealed_secret" in event
         assert "created_at" in event
-        assert "signature" in event
+        assert event["signature"] == ""  # Empty until handlers process
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_key_missing_group_id(self, initialized_db, identity_in_db):
-        """Test that missing group_id raises error."""
+        """Test that missing group_id uses empty string default."""
         params = {
             "network_id": identity_in_db["network_id"],
             "identity_id": identity_in_db["identity_id"]
         }
-        
-        with pytest.raises(ValueError, match="group_id is required"):
-            create_key(params, initialized_db)
+
+        envelope = create_key(params)
+        assert envelope["event_plaintext"]["group_id"] == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_key_missing_network_id(self, initialized_db, identity_in_db):
-        """Test that missing network_id raises error."""
+        """Test that missing network_id uses empty string default."""
         params = {
             "group_id": "test-group",
             "identity_id": identity_in_db["identity_id"]
         }
-        
-        with pytest.raises(ValueError, match="network_id is required"):
-            create_key(params, initialized_db)
+
+        envelope = create_key(params)
+        assert envelope["event_plaintext"]["network_id"] == ""
+        assert envelope["network_id"] == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_key_missing_identity_id(self, initialized_db):
-        """Test that missing identity_id raises error."""
+        """Test that missing identity_id uses empty string default."""
         params = {
             "group_id": "test-group",
             "network_id": "test-network"
         }
-        
-        with pytest.raises(ValueError, match="identity_id is required"):
-            create_key(params, initialized_db)
+
+        envelope = create_key(params)
+        assert envelope["event_plaintext"]["peer_id"] == ""
+        assert envelope["peer_id"] == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_key_invalid_identity(self, initialized_db):
-        """Test that invalid identity_id raises error."""
+    def test_create_key_with_any_identity_id(self, initialized_db):
+        """Test that any identity_id works (no validation in commands)."""
         params = {
             "group_id": "test-group",
             "network_id": "test-network",
             "identity_id": "non-existent-identity"
         }
-        
-        with pytest.raises(ValueError, match="Identity .* not found"):
-            create_key(params, initialized_db)
+
+        envelope = create_key(params)
+        assert envelope["event_plaintext"]["peer_id"] == "non-existent-identity"
+        assert envelope["peer_id"] == "non-existent-identity"
     
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_key_signature_valid(self, initialized_db, identity_in_db):
-        """Test that the created key has a valid signature."""
-        params = {
-            "group_id": "test-group",
-            "network_id": identity_in_db["network_id"],
-            "identity_id": identity_in_db["identity_id"]
-        }
-        
-        envelopes = create_key(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
-        
-        # Remove signature from event for verification
-        signature_hex = event["signature"]
-        signature = bytes.fromhex(signature_hex)
-        
-        # Create the message that was signed
-        event_copy = event.copy()
-        del event_copy["signature"]
-        message = json.dumps(event_copy, sort_keys=True).encode()
-        
-        # Get public key
-        public_key = bytes.fromhex(event["peer_id"])
-        
-        # Verify signature
-        assert verify(message, signature, public_key)
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -152,8 +127,8 @@ class TestKeyCommand:
             "identity_id": identity_in_db["identity_id"]
         }
         
-        envelopes = create_key(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
+        envelope = create_key(params)
+        event = envelope["event_plaintext"]
         
         # Check sealed_secret is hex
         sealed_secret_hex = event["sealed_secret"]
@@ -165,23 +140,24 @@ class TestKeyCommand:
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_key_deterministic_key_id(self, initialized_db, identity_in_db):
-        """Test that key_id is deterministic based on event content."""
+    def test_create_key_empty_key_id(self, initialized_db, identity_in_db):
+        """Test that key_id is empty until processed by handlers."""
         params = {
             "group_id": "test-group",
             "network_id": identity_in_db["network_id"],
             "identity_id": identity_in_db["identity_id"]
         }
-        
+
         # Create two keys for same group
-        envelopes1 = create_key(params, initialized_db)
-        envelopes2 = create_key(params, initialized_db)
-        
-        key_id1 = envelopes1[0]["event_plaintext"]["key_id"]
-        key_id2 = envelopes2[0]["event_plaintext"]["key_id"]
-        
-        # Key IDs should be different (different timestamps and secrets)
-        assert key_id1 != key_id2
+        envelope1 = create_key(params)
+        envelope2 = create_key(params)
+
+        key_id1 = envelope1["event_plaintext"]["key_id"]
+        key_id2 = envelope2["event_plaintext"]["key_id"]
+
+        # Key IDs should both be empty strings until handlers process them
+        assert key_id1 == ""
+        assert key_id2 == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -192,16 +168,17 @@ class TestKeyCommand:
             "network_id": identity_in_db["network_id"],
             "identity_id": identity_in_db["identity_id"]
         }
-        
+
         # Create three keys for same group
         key_ids = []
         for i in range(3):
-            envelopes = create_key(params, initialized_db)
-            key_id = envelopes[0]["event_plaintext"]["key_id"]
+            envelope = create_key(params)
+            key_id = envelope["event_plaintext"]["key_id"]
             key_ids.append(key_id)
-        
-        # All key IDs should be unique
-        assert len(set(key_ids)) == 3
+
+        # All key IDs should be empty strings until handlers process them
+        assert all(key_id == "" for key_id in key_ids)
+        assert len(key_ids) == 3
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -213,9 +190,8 @@ class TestKeyCommand:
             "identity_id": identity_in_db["identity_id"]
         }
         
-        envelopes = create_key(params, initialized_db)
-        envelope = envelopes[0]
-        
+        envelope = create_key(params)
+
         # Required fields for pipeline
         assert envelope["event_type"] == "key"
         assert envelope["self_created"] == True

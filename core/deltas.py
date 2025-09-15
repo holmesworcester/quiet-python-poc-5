@@ -5,14 +5,14 @@ Deltas are SQL operations emitted by projectors.
 import sqlite3
 from typing import List
 import json
-from core.types import Delta
+from typing import Any
 
 
 class DeltaApplicator:
     """Applies deltas (SQL operations) to the database."""
     
     @staticmethod
-    def apply(delta: Delta, db: sqlite3.Connection) -> None:
+    def apply(delta: dict[str, Any], db: sqlite3.Connection) -> None:
         """
         Apply a delta to the database.
         
@@ -71,7 +71,7 @@ class DeltaApplicator:
             raise ValueError(f"Unknown delta operation: {op}")
     
     @staticmethod
-    def apply_batch(deltas: List[Delta], db: sqlite3.Connection) -> None:
+    def apply_batch(deltas: List[dict[str, Any]], db: sqlite3.Connection) -> None:
         """Apply multiple deltas in a transaction."""
         try:
             for delta in deltas:

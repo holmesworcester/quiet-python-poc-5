@@ -5,12 +5,14 @@ With strict typing, we no longer need strip_for_send. This handler only
 accepts OutgoingTransitEnvelope which contains exactly what goes on the wire.
 """
 
-from core.types import Envelope
-from protocols.quiet.envelope_types import OutgoingTransitEnvelope
-from typing import cast, Callable
+# Removed core.types import
+from protocols.quiet.protocol_types import OutgoingTransitEnvelope
+from typing import Any, List, Callable
+import sqlite3
+from core.handlers import Handler
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that have transit encryption and destination info.
     
@@ -24,7 +26,7 @@ def filter_func(envelope: Envelope) -> bool:
     )
 
 
-def handler(envelope: Envelope, send_func: Callable) -> None:
+def handler(envelope: dict[str, Any], send_func: Callable) -> None:
     """
     Send envelope to network.
     
@@ -65,3 +67,21 @@ def handler(envelope: Envelope, send_func: Callable) -> None:
         print(f"Failed to send to {transit_envelope['dest_ip']}:{transit_envelope['dest_port']}: {e}")
     
     # No return - this is a terminal handler
+
+class SendToNetworkHandler(Handler):
+    """Handler for send to network."""
+
+    @property
+    def name(self) -> str:
+        return "send_to_network"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Check if this handler should process the envelope."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Process the envelope."""
+        result = handler(envelope)
+        if result:
+            return [result]
+        return []

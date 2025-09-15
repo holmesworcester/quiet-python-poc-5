@@ -6,7 +6,7 @@ import time
 from protocols.quiet.handlers.event_store import (
     filter_func, handler, purge_event
 )
-from .test_base import HandlerTestBase
+from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 
 class TestEventStoreHandler(HandlerTestBase):

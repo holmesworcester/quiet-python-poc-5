@@ -1,11 +1,9 @@
 -- Invites table for storing network invites
 CREATE TABLE IF NOT EXISTS invites (
-    invite_code TEXT PRIMARY KEY,
+    invite_id TEXT PRIMARY KEY,
+    invite_pubkey TEXT NOT NULL UNIQUE,
     network_id TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    used INTEGER DEFAULT 0,
-    used_by TEXT,
-    used_at INTEGER
+    group_id TEXT NOT NULL,
+    inviter_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
 );

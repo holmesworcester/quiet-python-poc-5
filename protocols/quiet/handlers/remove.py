@@ -7,18 +7,21 @@ From plan.md:
 - Action: Checks deletion records and calls event type removers
 - Output Type: Same envelope with `should_remove: false` OR drops envelope (returns None)
 """
+from typing import Dict, List, Any, Optional, Set
+import sqlite3
 
-from core.types import Envelope
+# Removed core.types import
 import sqlite3
 from typing import Optional, Dict, Any, Set
 import importlib
+from core.handlers import Handler
 
 
 # Cache for loaded remover modules
 _removers_cache: Dict[str, Any] = {}
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that might need removal.
     Two phases:
@@ -38,16 +41,16 @@ def filter_func(envelope: Envelope) -> bool:
     return has_event_id or has_content
 
 
-def handler(envelope: Envelope, db: sqlite3.Connection) -> Optional[Envelope]:
+def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> Optional[dict[str, Any]]:
     """
     Check if event should be removed.
     
     Args:
-        envelope: Envelope to check
+        envelope: dict[str, Any] to check
         db: Database connection
         
     Returns:
-        Envelope with should_remove: false if keeping, None if removing
+        dict[str, Any] with should_remove: false if keeping, None if removing
     """
     # Phase 1: Check explicit deletions by event_id
     if envelope.get('event_id'):
@@ -85,7 +88,7 @@ def is_explicitly_deleted(event_id: str, db: sqlite3.Connection) -> bool:
 
 def get_removal_context(db: sqlite3.Connection) -> Dict[str, Set[str]]:
     """Get context for removal decisions."""
-    context = {
+    context: Dict[str, Set[str]] = {
         'deleted_channels': set(),
         'removed_users': set(),
         'deleted_messages': set()
@@ -122,3 +125,21 @@ def get_remover(event_type: str) -> Optional[Any]:
         # Not all event types need removers
         _removers_cache[event_type] = None
         return None
+
+class RemoveHandler(Handler):
+    """Handler for remove."""
+
+    @property
+    def name(self) -> str:
+        return "remove"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Check if this handler should process the envelope."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Process the envelope."""
+        result = handler(envelope, db)
+        if result:
+            return [result]
+        return []

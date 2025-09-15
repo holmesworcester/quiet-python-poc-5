@@ -11,7 +11,7 @@ protocol_dir = Path(__file__).parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.handlers.check_sig.handler import CheckSigHandler
+from protocols.quiet.handlers.signature import handler as check_sig_handler, filter_func as check_sig_filter
 from core.crypto import sign, generate_keypair
 
 
@@ -21,7 +21,7 @@ class TestCheckSigHandler:
     @pytest.fixture
     def handler(self):
         """Create handler instance."""
-        return CheckSigHandler()
+        return None  # Handler functions used directly
     
     @pytest.mark.unit
     @pytest.mark.handler

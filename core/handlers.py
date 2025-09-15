@@ -4,14 +4,14 @@ Handler base class and registry for pipeline processing.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Callable, Optional
 import sqlite3
-from core.types import Envelope
+from typing import Any
 
 
 class Handler(ABC):
     """Base class for all handlers in the pipeline."""
     
     @abstractmethod
-    def filter(self, envelope: Envelope) -> bool:
+    def filter(self, envelope: dict[str, Any]) -> bool:
         """
         Return True if this handler should process the envelope.
         This is how handlers subscribe to specific envelope traits.
@@ -19,7 +19,7 @@ class Handler(ABC):
         pass
     
     @abstractmethod
-    def process(self, envelope: Envelope, db: sqlite3.Connection) -> List[Envelope]:
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
         """
         Process the envelope and emit zero or more new envelopes.
         Can modify the database as needed.
@@ -36,21 +36,21 @@ class Handler(ABC):
 class HandlerRegistry:
     """Registry for all handlers in the system."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._handlers: List[Handler] = []
         self._handler_map: Dict[str, Handler] = {}
     
-    def register(self, handler: Handler):
+    def register(self, handler: Handler) -> None:
         """Register a handler."""
         self._handlers.append(handler)
         self._handler_map[handler.name] = handler
     
-    def process_envelope(self, envelope: Envelope, db: sqlite3.Connection) -> List[Envelope]:
+    def process_envelope(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
         """
         Pass envelope through all matching handlers.
         Returns all new envelopes emitted by handlers.
         """
-        all_emitted: List[Envelope] = []
+        all_emitted: List[dict[str, Any]] = []
         
         for handler in self._handlers:
             if handler.filter(envelope):

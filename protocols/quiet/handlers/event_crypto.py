@@ -6,11 +6,14 @@ From plan.md:
 - Encrypt Filter: `validated: true` AND has `event_plaintext` AND no `event_ciphertext`
 - Transform: Encrypts/decrypts events or unseals key events
 """
+from typing import Any, List
+import sqlite3
+from core.handlers import Handler
 
-from core.types import Envelope
+# Removed core.types import
 
 
-def filter_func(envelope: Envelope) -> bool:
+def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that need event-level crypto operations.
     """
@@ -30,12 +33,12 @@ def filter_func(envelope: Envelope) -> bool:
     return False
 
 
-def handler(envelope: Envelope) -> Envelope:
+def handler(envelope: dict[str, Any]) -> dict[str, Any]:
     """
     Handle event-level crypto operations.
     
     Args:
-        envelope: Envelope needing crypto operations
+        envelope: dict[str, Any] needing crypto operations
         
     Returns:
         Transformed envelope
@@ -59,7 +62,7 @@ def handler(envelope: Envelope) -> Envelope:
         return encrypt_event(envelope)
 
 
-def unseal_key_event(envelope: Envelope) -> Envelope:
+def unseal_key_event(envelope: dict[str, Any]) -> dict[str, Any]:
     """Unseal a key event using peer's identity and KEM."""
     # TODO: Implement actual KEM unsealing logic
     
@@ -85,7 +88,7 @@ def unseal_key_event(envelope: Envelope) -> Envelope:
     return envelope
 
 
-def decrypt_event(envelope: Envelope) -> Envelope:
+def decrypt_event(envelope: dict[str, Any]) -> dict[str, Any]:
     """Decrypt a regular event."""
     # TODO: Implement actual decryption logic
     
@@ -112,7 +115,7 @@ def decrypt_event(envelope: Envelope) -> Envelope:
     return envelope
 
 
-def encrypt_event(envelope: Envelope) -> Envelope:
+def encrypt_event(envelope: dict[str, Any]) -> dict[str, Any]:
     """Encrypt a validated plaintext event."""
     # TODO: Implement actual encryption logic
     
@@ -151,3 +154,21 @@ def encrypt_event(envelope: Envelope) -> Envelope:
     envelope['write_to_store'] = True
     
     return envelope
+
+class EventCryptoHandler(Handler):
+    """Handler for event crypto."""
+
+    @property
+    def name(self) -> str:
+        return "event_crypto"
+
+    def filter(self, envelope: dict[str, Any]) -> bool:
+        """Check if this handler should process the envelope."""
+        return filter_func(envelope)
+
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
+        """Process the envelope."""
+        result = handler(envelope)
+        if result:
+            return [result]
+        return []

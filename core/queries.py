@@ -1,102 +1,128 @@
 """
-Queries for the Quiet protocol.
-Queries are registered with the query registry and can be executed via the API.
+Generic query registry system for protocols.
+Queries are registered dynamically and enforce read-only database access.
 """
-import importlib
-from typing import Dict, Any, List, Callable
+from typing import Dict, Any, List, Callable, Optional, TypeVar
 import sqlite3
+import functools
+import inspect
+import importlib
+from pathlib import Path
+from .db import ReadOnlyConnection, get_readonly_connection
+
+T = TypeVar('T')
 
 
 class QueryRegistry:
-    """Registry for protocol queries."""
-    
-    def __init__(self):
+    """Registry for protocol queries with read-only enforcement."""
+
+    def __init__(self, protocol_dir: Optional[str] = None):
         self._queries: Dict[str, Callable] = {}
-        
-    def register(self, name: str, query: Callable):
+        if protocol_dir:
+            self._auto_discover_queries(protocol_dir)
+
+    def register(self, name: str, query: Callable) -> None:
         """Register a query function."""
         self._queries[name] = query
-        
+
     def execute(self, name: str, params: Dict[str, Any], db: sqlite3.Connection) -> Any:
-        """Execute a query and return results."""
+        """Execute a query with read-only database access."""
         if name not in self._queries:
             raise ValueError(f"Unknown query: {name}")
-            
+
         query = self._queries[name]
-        return query(params, db)
-        
+
+        # Wrap connection in read-only wrapper
+        readonly_db = get_readonly_connection(db)
+
+        # Execute query with read-only connection
+        return query(readonly_db, params)
+
     def list_queries(self) -> List[str]:
         """Return list of registered query names."""
         return sorted(self._queries.keys())
 
+    def _auto_discover_queries(self, protocol_dir: str) -> None:
+        """Auto-discover and register queries from protocol event modules."""
+        protocol_path = Path(protocol_dir)
+        events_dir = protocol_path / 'events'
 
-# Global query registry
+        if not events_dir.exists():
+            return
+
+        # Find all event type directories
+        for event_dir in events_dir.iterdir():
+            if not event_dir.is_dir() or event_dir.name.startswith('_'):
+                continue
+
+            event_type = event_dir.name
+            queries_file = event_dir / 'queries.py'
+
+            if queries_file.exists():
+                try:
+                    # Import the queries module
+                    module_name = f'protocols.{protocol_path.name}.events.{event_type}.queries'
+                    module = importlib.import_module(module_name)
+
+                    # Find all functions decorated with @query
+                    for name, obj in inspect.getmembers(module):
+                        if callable(obj) and hasattr(obj, '_is_query'):
+                            # Register with event_type.function_name format
+                            query_name = f'{event_type}.{name}'
+                            self.register(query_name, obj)
+                except ImportError:
+                    # Skip if module can't be imported
+                    pass
+
+
+# Global query registry (will be initialized with protocol_dir when needed)
 query_registry = QueryRegistry()
 
 
-# Event types to load queries from
-EVENT_TYPES = ['identity', 'key', 'transit_secret', 'group', 'channel', 'message']
+def query(func: Callable) -> Callable:
+    """
+    Decorator for query functions that enforces read-only database access.
 
-# Queries to register from each event type
-QUERIES = {
-    'identity': ['list'],
-    'key': ['list'],
-    'transit_secret': ['list'],
-    'group': ['list'],
-    'channel': ['list'],
-    'message': ['list']
-}
+    Query functions receive a ReadOnlyConnection that prevents modifications.
+    """
+    # Check signature - standard is (db, params)
+    sig = inspect.signature(func)
+    param_names = list(sig.parameters.keys())
 
+    if not param_names or param_names[0] != 'db':
+        raise TypeError(
+            f"{func.__name__} must have 'db' as first parameter for database connection"
+        )
 
-def register_queries():
-    """Register all queries from event types."""
-    
-    # Register event type queries
-    for event_type, query_names in QUERIES.items():
-        for query_name in query_names:
-            try:
-                # Import the query module
-                module = importlib.import_module(
-                    f'protocols.quiet.events.{event_type}.queries.{query_name}'
-                )
-                
-                # Register based on the expected function name
-                if query_name == 'list':
-                    # Special handling for list queries
-                    if event_type == 'identity':
-                        query_registry.register('identity.list', module.list_identities)
-                    elif event_type == 'key':
-                        query_registry.register('key.list', module.list_keys)
-                    elif event_type == 'transit_secret':
-                        query_registry.register('transit_secret.list', module.list_transit_keys)
-                    elif event_type == 'group':
-                        query_registry.register('group.list', module.list_groups)
-                    elif event_type == 'channel':
-                        query_registry.register('channel.list', module.list_channels)
-                    elif event_type == 'message':
-                        query_registry.register('message.list', module.list_messages)
-                else:
-                    # Generic registration for other queries
-                    func_name = f"{query_name}_{event_type}"
-                    if hasattr(module, func_name):
-                        query_registry.register(f"{event_type}.{query_name}", getattr(module, func_name))
-                        
-            except ImportError as e:
-                print(f"Failed to load query {query_name} for {event_type}: {e}")
-    
-    # Register system queries
-    query_registry.register('system.dump_database', dump_database)
-    query_registry.register('system.logs', get_logs)
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        # db is first argument - wrap it in read-only if needed
+        if args and isinstance(args[0], sqlite3.Connection):
+            readonly_conn = get_readonly_connection(args[0])
+            args = (readonly_conn,) + args[1:]
+        elif args and not isinstance(args[0], ReadOnlyConnection):
+            raise TypeError(
+                f"{func.__name__} must receive a database connection as first argument"
+            )
+
+        return func(*args, **kwargs)
+
+    # Mark as query function
+    wrapper._is_query = True  # type: ignore[attr-defined]
+
+    # Don't auto-register here - let the API do it with proper operation IDs
+
+    return wrapper
 
 
-# System query functions (moved from queries_system.py)
+# System query functions
 
-def dump_database(params: Dict[str, Any], db: sqlite3.Connection) -> Dict[str, List[Dict[str, Any]]]:
+def dump_database(db: ReadOnlyConnection, params: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     """Dump all tables in the database."""
     # Get all tables
     cursor = db.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = [row[0] for row in cursor.fetchall()]
-    
+
     result = {}
     for table in tables:
         cursor = db.execute(f"SELECT * FROM {table}")
@@ -114,12 +140,13 @@ def dump_database(params: Dict[str, Any], db: sqlite3.Connection) -> Dict[str, L
     return result
 
 
-def get_logs(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
+def get_logs(params: Dict[str, Any], db: ReadOnlyConnection) -> List[Dict[str, Any]]:
     """Get processor logs (placeholder for now)."""
     limit = params.get('limit', 100)
     # In the future, this could read from a logs table
     return []
 
 
-# Register queries on module load
-register_queries()
+# System queries are registered separately (not auto-discovered)
+query_registry.register('system.dump_database', dump_database)
+query_registry.register('system.logs', get_logs)

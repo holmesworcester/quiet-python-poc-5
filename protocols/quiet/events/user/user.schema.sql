@@ -4,22 +4,22 @@
 CREATE TABLE IF NOT EXISTS users (
     -- Unique user ID from the event
     user_id TEXT PRIMARY KEY,
-    
-    -- The peer's identity ID  
+
+    -- The peer's identity ID
     peer_id TEXT NOT NULL,
-    
+
     -- Network this user belongs to
     network_id TEXT NOT NULL,
-    
+
+    -- User's display name
+    name TEXT NOT NULL,
+
     -- When the user joined
     joined_at INTEGER NOT NULL,
-    
-    -- Last known network address (may be placeholder)
-    last_address TEXT NOT NULL,
-    
-    -- Last known port (may be 0)
-    last_port INTEGER NOT NULL,
-    
+
+    -- The invite pubkey used to join
+    invite_pubkey TEXT NOT NULL,
+
     -- Ensure one user event per peer per network
     UNIQUE(peer_id, network_id)
 );

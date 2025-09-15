@@ -2,12 +2,13 @@
 Validator for identity events.
 """
 from typing import Dict, Any
-from core.types import Envelope, validator, validate_envelope_fields
+from core.core_types import validator
+from protocols.quiet.protocol_types import validate_envelope_fields
 from protocols.quiet.events import IdentityEventData, validate_event_data
 
 
 @validator
-def validate(envelope: Envelope) -> bool:
+def validate(envelope: dict[str, Any]) -> bool:
     """
     Validate an identity event.
     
@@ -31,8 +32,12 @@ def validate(envelope: Envelope) -> bool:
     except ValueError:
         return False
     
-    # Check network_id is present and non-empty
-    if not event['network_id'] or not isinstance(event['network_id'], str):
+    # Check network_id is present (can be empty for self_created identity)
+    if 'network_id' not in event or not isinstance(event['network_id'], str):
+        return False
+
+    # For non-self-created identities, network_id must be non-empty
+    if not envelope.get('self_created') and not event['network_id']:
         return False
     
     # Check created_at is a positive integer (milliseconds)

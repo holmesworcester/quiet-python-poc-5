@@ -15,7 +15,8 @@ sys.path.insert(0, str(project_root))
 
 from core.db import get_connection, init_database
 from core.crypto import generate_keypair, sign
-from core.processor import command_registry, PipelineRunner
+from core.commands import command_registry
+from core.pipeline import PipelineRunner
 
 
 def process_envelope(envelope, db):

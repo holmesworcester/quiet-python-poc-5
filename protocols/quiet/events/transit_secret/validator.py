@@ -2,12 +2,13 @@
 Validator for transit secret events.
 """
 from typing import Dict, Any
-from core.types import Envelope, validator, validate_envelope_fields
+from core.core_types import validator
+from protocols.quiet.protocol_types import validate_envelope_fields
 from protocols.quiet.events import TransitSecretEventData, validate_event_data
 
 
 @validator
-def validate(envelope: Envelope) -> bool:
+def validate(envelope: dict[str, Any]) -> bool:
     """
     Validate a transit secret event.
     

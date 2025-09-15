@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import sqlite3
 
-from .processor import PipelineRunner
+from .pipeline import PipelineRunner
 from .db import get_connection, init_database
 
 
@@ -58,7 +58,7 @@ class API:
         # Discover and register implementations
         self._discover_implementations()
     
-    def _parse_operations(self):
+    def _parse_operations(self) -> None:
         """Parse operations from OpenAPI spec."""
         self.operations = {}
         
@@ -73,7 +73,7 @@ class API:
                         'spec': spec
                     }
     
-    def _discover_implementations(self):
+    def _discover_implementations(self) -> None:
         """Discover command and query implementations for operations."""
         import sys
         protocol_root = self.protocol_dir.parent.parent
@@ -81,8 +81,13 @@ class API:
             sys.path.insert(0, str(protocol_root))
         
         # Import registries
-        from core.processor import command_registry
-        from core.query import query_registry
+        from core.commands import command_registry
+        from core.queries import query_registry
+
+        # Use the global query registry which has system queries
+        self.query_registry = query_registry
+        # Auto-discover protocol queries
+        self.query_registry._auto_discover_queries(str(self.protocol_dir))
         
         # Protocol implementations could be organized in any way
         # We'll search for Python files that might contain implementations
@@ -115,9 +120,8 @@ class API:
                                 if getattr(func, '_is_command', False):
                                     command_registry.register(operation_id, func)
                             elif operation['method'] == 'get':
-                                # Register as query if it has the query marker
-                                if getattr(func, '_is_query', False):
-                                    query_registry.register(operation_id, func)
+                                # Queries are auto-discovered from the @query decorator
+                                pass
                 
             except ImportError:
                 # Module couldn't be imported, skip it
@@ -140,78 +144,105 @@ class API:
             raise ValueError(f"Unsupported method: {operation['method']}")
     
     def _execute_command(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Execute a command through the pipeline runner."""
-        from core.processor import command_registry
-        
+        """Execute a command through the pipeline runner and return standard response."""
+        from core.commands import command_registry
+        import uuid
+
         # Get database connection
         db = get_connection(str(self.db_path))
-        
+
         try:
+            # Generate request ID for tracking
+            request_id = str(uuid.uuid4())
+
             # Execute command through registry
             envelopes = command_registry.execute(operation_id, params or {}, db)
-            
+
+            # Add request_id to all envelopes for tracking
+            for envelope in envelopes:
+                envelope['request_id'] = request_id
+
             # Run the pipeline to process the envelopes
+            # Pipeline returns mapping of event_type -> event_id for stored events
+            stored_ids = {}
             if envelopes:
-                self.runner.run(
+                stored_ids = self.runner.run(
                     protocol_dir=str(self.protocol_dir),
-                    input_envelopes=envelopes
+                    input_envelopes=envelopes,
+                    db=db  # Pass db so pipeline can track stored events
                 )
-            
-            # Extract result data from the first envelope
-            result_data = {}
-            if envelopes:
-                env = envelopes[0]
-                if 'event_plaintext' in env:
-                    result_data = env['event_plaintext']
-                else:
-                    result_data = env
-            
-            return result_data
+
+            # Check if command has a response handler
+            response_handler = command_registry.get_response_handler(operation_id)
+
+            if response_handler:
+                # Let the command shape its own response with query data
+                return response_handler(stored_ids, params or {}, db)
+            else:
+                # Fallback to standard response with just IDs
+                return {
+                    "ids": stored_ids,
+                    "data": {}
+                }
             
         finally:
             db.close()
     
-    def _execute_query(self, operation_id: str, params: Dict[str, Any] = None) -> Any:
+    def _execute_query(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Any:
         """Execute a query."""
-        from core.query import query_registry
-        
         # Get database connection
         db = get_connection(str(self.db_path))
-        
+
         try:
-            # Execute query through registry using operation_id
-            result = query_registry.execute(operation_id, db, params or {})
+            # Map OpenAPI operation IDs to query names
+            # e.g., get_identities -> identity.get
+            query_name = self._map_operation_to_query(operation_id)
+
+            # Execute query through registry
+            result = self.query_registry.execute(query_name, params or {}, db)
             return result
-            
+
         finally:
             db.close()
+
+    def _map_operation_to_query(self, operation_id: str) -> str:
+        """Map OpenAPI operation ID to query name."""
+        # Mapping rules:
+        # get_identities -> identity.get
+        # get_users -> user.get
+        # list_keys -> key.list
+        # etc.
+
+        mappings = {
+            'get_identities': 'identity.get',
+            'get_users': 'user.get',
+            'get_groups': 'group.get',
+            'get_channels': 'channel.get',
+            'get_messages': 'message.get',
+            'list_keys': 'key.list',
+            'list_transit_keys': 'transit_secret.list',
+            'dump_database': 'system.dump_database',
+            # Add more mappings as needed
+        }
+
+        return mappings.get(operation_id, operation_id)
     
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Dynamic method creation for OpenAPI operations."""
         # Check if this is an operation from OpenAPI spec
         if name in self.operations:
-            def operation_method(*args, **kwargs):
-                # Handle both positional and keyword arguments
-                if args and not kwargs:
-                    # Check the OpenAPI spec to determine parameter names
-                    spec = self.operations[name]['spec']
-                    if 'requestBody' in spec:
-                        schema = spec['requestBody']['content']['application/json']['schema']
-                        required = schema.get('required', [])
-                        
-                        # If single required parameter and single argument, map it
-                        if len(required) == 1 and len(args) == 1:
-                            param_name = required[0]
-                            return self.execute_operation(name, {param_name: args[0]})
-                    
-                    # Otherwise assume it's a params dict
-                    return self.execute_operation(name, args[0] if isinstance(args[0], dict) else None)
-                else:
-                    return self.execute_operation(name, kwargs if kwargs else None)
+            def operation_method(params: Optional[Dict[str, Any]] = None) -> Any:
+                # Always expect a params dict
+                return self.execute_operation(name, params)
             return operation_method
         
         # If not found, raise AttributeError
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+
+# Alias for backwards compatibility
+from typing import Type
+APIClient: Type[API] = API
 
 
 class APIError(Exception):

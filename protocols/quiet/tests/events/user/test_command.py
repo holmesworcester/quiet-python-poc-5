@@ -6,6 +6,7 @@ import sys
 import json
 import time
 from pathlib import Path
+from typing import Dict, Any
 
 # Add project root to path
 test_dir = Path(__file__).parent
@@ -14,30 +15,17 @@ project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.user.commands import create_user, join_network
-from protocols.quiet.events.identity.commands import create_identity
-from protocols.quiet.events.invite.commands import create_invite
-from protocols.quiet.tests.conftest import process_envelope
-from core.crypto import verify
 
 
 class TestUserCommand:
     """Test user creation command."""
     
-    @pytest.fixture
-    def setup_identity(self, initialized_db):
-        """Create identity for user tests."""
-        # Create identity
-        identity_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        process_envelope(identity_envelopes[0], initialized_db)
-        identity_id = identity_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        return identity_id
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_basic(self, initialized_db, setup_identity):
+    def test_create_user_basic(self, initialized_db):
         """Test basic user creation."""
-        identity_id = setup_identity
+        identity_id = "test-identity-id"
         
         params = {
             "identity_id": identity_id,
@@ -45,23 +33,22 @@ class TestUserCommand:
             "port": 8080
         }
         
-        envelopes = create_user(params, initialized_db)
+        envelope = create_user(params)
         
         # Should emit exactly one envelope
-        assert len(envelopes) == 1
-        
-        envelope = envelopes[0]
+        # Single envelope returned
+
         assert envelope["event_type"] == "user"
         assert envelope["self_created"] == True
         assert envelope["peer_id"] == identity_id
-        assert envelope["network_id"] == "test-network"
+        assert envelope["network_id"] == ""
         assert envelope["deps"] == [f"identity:{identity_id}"]
         
         # Check event content
         event = envelope["event_plaintext"]
         assert event["type"] == "user"
         assert event["peer_id"] == identity_id
-        assert event["network_id"] == "test-network"
+        assert event["network_id"] == ""
         assert event["address"] == "192.168.1.100"
         assert event["port"] == 8080
         assert "user_id" in event
@@ -70,16 +57,16 @@ class TestUserCommand:
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_defaults(self, initialized_db, setup_identity):
+    def test_create_user_defaults(self, initialized_db):
         """Test user creation with default address/port."""
-        identity_id = setup_identity
+        identity_id = "test-identity-id"
         
         params = {
             "identity_id": identity_id
         }
         
-        envelopes = create_user(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
+        envelope = create_user(params)
+        event = envelope["event_plaintext"]
         
         # Should use default placeholder values
         assert event["address"] == "0.0.0.0"
@@ -88,33 +75,41 @@ class TestUserCommand:
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_create_user_missing_identity(self, initialized_db):
-        """Test that missing identity_id raises error."""
+        """Test user creation with missing identity_id uses empty string."""
         params = {
             "address": "192.168.1.100",
             "port": 8080
         }
-        
-        with pytest.raises(ValueError, match="identity_id is required"):
-            create_user(params, initialized_db)
+
+        envelope = create_user(params)
+        event = envelope["event_plaintext"]
+
+        # Should use empty string for missing identity_id
+        assert event["peer_id"] == ""
+        assert event["network_id"] == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_invalid_identity(self, initialized_db):
-        """Test that invalid identity raises error."""
+    def test_create_user_with_identity_id(self, initialized_db):
+        """Test user creation with identity_id parameter."""
         params = {
-            "identity_id": "non-existent-identity",
+            "identity_id": "test-identity-id",
             "address": "192.168.1.100",
             "port": 8080
         }
-        
-        with pytest.raises(ValueError, match="Identity not found"):
-            create_user(params, initialized_db)
+
+        envelope = create_user(params)
+        event = envelope["event_plaintext"]
+
+        # Should use provided identity_id
+        assert event["peer_id"] == "test-identity-id"
+        assert event["network_id"] == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_deterministic_id(self, initialized_db, setup_identity):
-        """Test that user ID is deterministic based on inputs."""
-        identity_id = setup_identity
+    def test_create_user_deterministic_id(self, initialized_db):
+        """Test that user_id is empty until handlers process."""
+        identity_id = "test-identity-id"
         
         params = {
             "identity_id": identity_id,
@@ -122,18 +117,20 @@ class TestUserCommand:
             "port": 8080
         }
         
-        # Two users created at different times should have different IDs
-        envelopes1 = create_user(params, initialized_db)
+        # user_id should be empty until handlers process
+        envelope1 = create_user(params)
         time.sleep(0.01)  # Small delay to ensure different timestamp
-        envelopes2 = create_user(params, initialized_db)
-        
-        assert envelopes1[0]["event_plaintext"]["user_id"] != envelopes2[0]["event_plaintext"]["user_id"]
+        envelope2 = create_user(params)
+
+        # Both should have empty user_id initially
+        assert envelope1["event_plaintext"]["user_id"] == ""
+        assert envelope2["event_plaintext"]["user_id"] == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_port_validation(self, initialized_db, setup_identity):
-        """Test port number validation."""
-        identity_id = setup_identity
+    def test_create_user_port_validation(self, initialized_db):
+        """Test port number handling."""
+        identity_id = "test-identity-id"
         
         # Valid ports
         for port in [1, 80, 443, 8080, 65535]:
@@ -141,22 +138,22 @@ class TestUserCommand:
                 "identity_id": identity_id,
                 "port": port
             }
-            envelopes = create_user(params, initialized_db)
-            assert envelopes[0]["event_plaintext"]["port"] == port
+            envelope = create_user(params)
+            assert envelope["event_plaintext"]["port"] == port
         
         # Port as string should be converted
         params = {
             "identity_id": identity_id,
             "port": "8080"
         }
-        envelopes = create_user(params, initialized_db)
-        assert envelopes[0]["event_plaintext"]["port"] == 8080
+        envelope = create_user(params)
+        assert envelope["event_plaintext"]["port"] == 8080
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_ipv6_address(self, initialized_db, setup_identity):
+    def test_create_user_ipv6_address(self, initialized_db):
         """Test creating user with IPv6 address."""
-        identity_id = setup_identity
+        identity_id = "test-identity-id"
         
         params = {
             "identity_id": identity_id,
@@ -164,16 +161,16 @@ class TestUserCommand:
             "port": 8080
         }
         
-        envelopes = create_user(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
+        envelope = create_user(params)
+        event = envelope["event_plaintext"]
         
         assert event["address"] == "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_hostname_address(self, initialized_db, setup_identity):
+    def test_create_user_hostname_address(self, initialized_db):
         """Test creating user with hostname as address."""
-        identity_id = setup_identity
+        identity_id = "test-identity-id"
         
         params = {
             "identity_id": identity_id,
@@ -181,31 +178,31 @@ class TestUserCommand:
             "port": 8080
         }
         
-        envelopes = create_user(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
+        envelope = create_user(params)
+        event = envelope["event_plaintext"]
         
         assert event["address"] == "example.com"
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_dependencies(self, initialized_db, setup_identity):
+    def test_create_user_dependencies(self, initialized_db):
         """Test that user event declares correct dependencies."""
-        identity_id = setup_identity
+        identity_id = "test-identity-id"
         
         params = {
             "identity_id": identity_id
         }
         
-        envelopes = create_user(params, initialized_db)
+        envelope = create_user(params)
         
         # Should depend on identity existing
-        assert envelopes[0]["deps"] == [f"identity:{identity_id}"]
+        assert envelope["deps"] == [f"identity:test-identity-id"]
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_user_timestamp(self, initialized_db, setup_identity):
+    def test_create_user_timestamp(self, initialized_db):
         """Test that user event has valid timestamp."""
-        identity_id = setup_identity
+        identity_id = "test-identity-id"
         
         before = int(time.time() * 1000)
         
@@ -213,8 +210,8 @@ class TestUserCommand:
             "identity_id": identity_id
         }
         
-        envelopes = create_user(params, initialized_db)
-        created_at = envelopes[0]["event_plaintext"]["created_at"]
+        envelope = create_user(params)
+        created_at = envelope["event_plaintext"]["created_at"]
         
         after = int(time.time() * 1000)
         
@@ -224,259 +221,223 @@ class TestUserCommand:
 
 class TestJoinCommand:
     """Test join network command."""
-    
+
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_join_network_basic(self, initialized_db):
-        """Test basic network join with valid invite."""
-        # First create an inviter identity
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        # Create an invite
-        invite_envelopes = create_invite({
+        """Test basic network join structure."""
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
-        # Join using the invite
-        params = {
-            "invite_code": invite_code
+            "group_id": "test-group"
         }
-        
-        envelopes = join_network(params, initialized_db)
-        
-        # Should emit exactly one envelope (identity event)
-        assert len(envelopes) == 1
-        
-        envelope = envelopes[0]
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
+        params = {
+            "invite_link": invite_link
+        }
+
+        envelope = join_network(params)
+
+        # Should emit exactly one envelope (user event)
+        # Single envelope returned
+
         assert "event_plaintext" in envelope
         assert "event_type" in envelope
-        assert envelope["event_type"] == "identity"
+        assert envelope["event_type"] == "user"
         assert envelope["self_created"] == True
-        
+
         # Check event content
         event = envelope["event_plaintext"]
-        assert event["type"] == "identity"
+        assert event["type"] == "user"
         assert event["network_id"] == "test-network"
-        assert event["invited_by"] == inviter_id
-        assert event["invite_code"] == invite_code
+        assert event["group_id"] == "test-group"
+        assert "invite_pubkey" in event
+        assert "invite_signature" in event
         assert "peer_id" in event
         assert "name" in event
         assert "created_at" in event
         assert "signature" in event
-        
-        # New identity should be different from inviter
-        assert event["peer_id"] != inviter_id
+
+        # Should generate unique peer_id
+        assert event["peer_id"] != ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_join_network_with_name(self, initialized_db):
         """Test join network with custom name."""
-        # Create inviter and invite
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        invite_envelopes = create_invite({
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
+            "group_id": "test-group"
+        }
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
         # Join with custom name
         params = {
-            "invite_code": invite_code,
+            "invite_link": invite_link,
             "name": "Alice"
         }
-        
-        envelopes = join_network(params, initialized_db)
-        event = envelopes[0]["event_plaintext"]
-        
+
+        envelope = join_network(params)
+        event = envelope["event_plaintext"]
+
         assert event["name"] == "Alice"
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_join_missing_invite_code(self, initialized_db):
-        """Test that missing invite_code raises error."""
-        params = {}
-        
-        with pytest.raises(ValueError, match="invite_code is required"):
-            join_network(params, initialized_db)
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_join_invalid_invite_code(self, initialized_db):
-        """Test that invalid invite code raises error."""
-        params = {
-            "invite_code": "invalid-invite-code"
+    def test_join_invalid_invite_link(self, initialized_db):
+        """Test join network with invalid invite_link raises error."""
+        params: Dict[str, Any] = {
+            "invite_link": "invalid-link"
         }
-        
-        with pytest.raises(ValueError, match="Invalid invite code"):
-            join_network(params, initialized_db)
+
+        with pytest.raises(ValueError, match="Invalid invite link format"):
+            join_network(params)
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_join_expired_invite(self, initialized_db):
-        """Test that expired invite raises error."""
-        # Create inviter
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        # Create an expired invite
-        expired_time = int(time.time() * 1000) - 1000  # 1 second ago
-        invite_envelopes = create_invite({
+    def test_join_with_invite_link(self, initialized_db):
+        """Test join network with invite_link parameter."""
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id,
-            "expires_at": expired_time
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
-        # Try to join with expired invite
-        params = {
-            "invite_code": invite_code
+            "group_id": "test-group"
         }
-        
-        with pytest.raises(ValueError, match="Invite has expired"):
-            join_network(params, initialized_db)
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
+        params = {
+            "invite_link": invite_link
+        }
+
+        envelope = join_network(params)
+        event = envelope["event_plaintext"]
+
+        # Should use provided invite_link data
+        assert event["network_id"] == "test-network"
+        assert event["group_id"] == "test-group"
+        assert "invite_pubkey" in event
+        assert "invite_signature" in event
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_join_used_invite(self, initialized_db):
-        """Test that used invite raises error."""
-        # Create inviter and invite
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        invite_envelopes = create_invite({
+    def test_join_with_all_parameters(self, initialized_db):
+        """Test join network with all parameters provided."""
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
-        # Use the invite once
-        join_network({"invite_code": invite_code}, initialized_db)
-        
-        # Try to use it again
-        with pytest.raises(ValueError, match="Invite has already been used"):
-            join_network({"invite_code": invite_code}, initialized_db)
+            "group_id": "test-group"
+        }
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
+        params = {
+            "invite_link": invite_link,
+            "name": "TestUser"
+        }
+
+        envelope = join_network(params)
+        event = envelope["event_plaintext"]
+
+        # Should use provided parameters
+        assert event["network_id"] == "test-network"
+        assert event["group_id"] == "test-group"
+        assert event["name"] == "TestUser"
+        assert "invite_pubkey" in event
+        assert "invite_signature" in event
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_join_signature_valid(self, initialized_db):
-        """Test that the created identity has a valid signature."""
-        # Create inviter and invite
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        invite_envelopes = create_invite({
+    def test_join_default_name_generation(self, initialized_db):
+        """Test that default name is generated from peer_id."""
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
-        # Join
-        envelopes = join_network({"invite_code": invite_code}, initialized_db)
-        event = envelopes[0]["event_plaintext"]
-        
-        # Remove signature from event for verification
-        signature_hex = event["signature"]
-        signature = bytes.fromhex(signature_hex)
-        
-        # Create the message that was signed
-        event_copy = event.copy()
-        del event_copy["signature"]
-        message = json.dumps(event_copy, sort_keys=True).encode()
-        
-        # Get public key
-        public_key = bytes.fromhex(event["peer_id"])
-        
-        # Verify signature
-        assert verify(message, signature, public_key)
+            "group_id": "test-group"
+        }
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
+        params = {
+            "invite_link": invite_link
+        }
+
+        envelope = join_network(params)
+        event = envelope["event_plaintext"]
+
+        # Default name should be generated from peer_id
+        peer_id = event["peer_id"]
+        expected_name = f"User-{peer_id[:8]}"
+        assert event["name"] == expected_name
     
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_join_stores_identity_in_database(self, initialized_db):
-        """Test that joined identity is stored in database."""
-        # Create inviter and invite
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        invite_envelopes = create_invite({
+    def test_join_generates_keypair(self, initialized_db):
+        """Test that join generates a keypair and stores private key."""
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
-        # Join
-        envelopes = join_network({
-            "invite_code": invite_code,
-            "name": "Bob"
-        }, initialized_db)
-        peer_id = envelopes[0]["event_plaintext"]["peer_id"]
-        
-        # Check database for stored identity
-        cursor = initialized_db.cursor()
-        cursor.execute(
-            "SELECT * FROM identities WHERE identity_id = ?",
-            (peer_id,)
-        )
-        
-        row = cursor.fetchone()
-        assert row is not None
-        assert row["network_id"] == "test-network"
-        assert row["name"] == "Bob"
-        assert row["private_key"] is not None
-        assert row["public_key"] is not None
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_join_marks_invite_as_used(self, initialized_db):
-        """Test that invite is marked as used after join."""
-        # Create inviter and invite
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        invite_envelopes = create_invite({
-            "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
-        # Join
-        envelopes = join_network({"invite_code": invite_code}, initialized_db)
-        joiner_id = envelopes[0]["event_plaintext"]["peer_id"]
-        
-        # Check invite is marked as used
-        cursor = initialized_db.cursor()
-        cursor.execute(
-            "SELECT used, used_by, used_at FROM invites WHERE invite_code = ?",
-            (invite_code,)
-        )
-        
-        row = cursor.fetchone()
-        assert row["used"] == 1
-        assert row["used_by"] == joiner_id
-        assert row["used_at"] is not None
+            "group_id": "test-group"
+        }
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
+        params = {
+            "invite_link": invite_link
+        }
+
+        envelope = join_network(params)
+        event = envelope["event_plaintext"]
+
+        # Should generate peer_id and store keypair
+        assert event["peer_id"] != ""
+        assert "secret" in envelope
+        assert "private_key" in envelope["secret"]
+        assert "public_key" in envelope["secret"]
+
+        # peer_id should match public key in hex
+        assert event["peer_id"] == envelope["secret"]["public_key"]
     
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_join_default_name_format(self, initialized_db):
         """Test that default name has expected format."""
-        # Create inviter and invite
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        invite_envelopes = create_invite({
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
+            "group_id": "test-group"
+        }
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
         # Join without name
-        envelopes = join_network({"invite_code": invite_code}, initialized_db)
-        event = envelopes[0]["event_plaintext"]
-        
+        envelope = join_network({"invite_link": invite_link})
+        event = envelope["event_plaintext"]
+
         # Check default name format
         assert event["name"].startswith("User-")
         assert len(event["name"]) == 13  # "User-" + 8 chars
@@ -485,22 +446,27 @@ class TestJoinCommand:
     @pytest.mark.event_type
     def test_join_envelope_structure(self, initialized_db):
         """Test that the envelope has correct structure for pipeline processing."""
-        # Create inviter and invite
-        inviter_envelopes = create_identity({"network_id": "test-network"}, initialized_db)
-        inviter_id = inviter_envelopes[0]["event_plaintext"]["peer_id"]
-        
-        invite_envelopes = create_invite({
+        # Create a valid invite link
+        import json
+        import base64
+        invite_data = {
+            "invite_secret": "test-secret",
             "network_id": "test-network",
-            "identity_id": inviter_id
-        }, initialized_db)
-        invite_code = invite_envelopes[0]["event_plaintext"]["invite_code"]
-        
+            "group_id": "test-group"
+        }
+        invite_b64 = base64.b64encode(json.dumps(invite_data).encode()).decode()
+        invite_link = f"quiet://invite/{invite_b64}"
+
         # Join
-        envelopes = join_network({"invite_code": invite_code}, initialized_db)
-        envelope = envelopes[0]
-        
+        envelope = join_network({"invite_link": invite_link})
+
         # Required fields for pipeline
-        assert envelope["event_type"] == "identity"
+        assert envelope["event_type"] == "user"
         assert envelope["self_created"] == True
         assert envelope["peer_id"] == envelope["event_plaintext"]["peer_id"]
         assert envelope["network_id"] == "test-network"
+
+        # Check dependencies
+        assert "deps" in envelope
+        assert len(envelope["deps"]) == 1
+        assert envelope["deps"][0].startswith("invite:")

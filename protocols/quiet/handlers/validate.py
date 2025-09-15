@@ -5,9 +5,9 @@ import json
 from typing import List, Dict, Any, cast as type_cast
 import sqlite3
 import importlib
-from core.handler import Handler
-from core.types import Envelope, validate_envelope_fields
-from protocols.quiet.envelope_types import ValidatableEvent, BaseEnvelope
+from core.handlers import Handler
+from protocols.quiet.protocol_types import validate_envelope_fields
+from protocols.quiet.protocol_types import ValidatableEvent, BaseEnvelope
 from protocols.quiet.handlers.event_store import purge_event
 
 
@@ -18,16 +18,16 @@ class ValidateHandler(Handler):
     Emits: envelopes with validated=True
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         # Map of event types to their validator modules
-        self.validators = {}
+        self.validators: Dict[str, Any] = {}
         self._load_validators()
     
     @property
     def name(self) -> str:
         return "validate"
     
-    def filter(self, envelope: Envelope) -> bool:
+    def filter(self, envelope: dict[str, Any]) -> bool:
         """Process envelopes ready for validation."""
         return (
             validate_envelope_fields(envelope, {'event_plaintext', 'event_type'}) and
@@ -36,7 +36,7 @@ class ValidateHandler(Handler):
             'event_id' in envelope  # Required for purging if validation fails
         )
     
-    def process(self, envelope: Envelope, db: sqlite3.Connection) -> List[Envelope]:
+    def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
         """Validate event using type-specific validator."""
         
         # We don't need full DecryptedEnvelope validation since event_id comes later
@@ -78,14 +78,31 @@ class ValidateHandler(Handler):
         
         return [envelope]
     
-    def _load_validators(self):
-        """Load event type validators."""
-        # Load all available event type validators
-        event_types = ['identity', 'key', 'transit_secret', 'group', 'channel', 'message', 'invite', 'add', 'network']
-        
-        for event_type in event_types:
-            try:
-                module = importlib.import_module(f'protocols.quiet.events.{event_type}.validator')
-                self.validators[event_type] = module
-            except ImportError as e:
-                print(f"Failed to load {event_type} validator: {e}")
+    def _load_validators(self) -> None:
+        """Dynamically load all event type validators from the events directory."""
+        import os
+        from pathlib import Path
+
+        # Find the events directory
+        events_dir = Path(__file__).parent.parent / 'events'
+
+        if not events_dir.exists():
+            print(f"Events directory not found: {events_dir}")
+            return
+
+        # Iterate through all subdirectories in events/
+        for event_dir in events_dir.iterdir():
+            if event_dir.is_dir() and not event_dir.name.startswith('_'):
+                event_type = event_dir.name
+                validator_file = event_dir / 'validator.py'
+
+                # Check if validator.py exists
+                if validator_file.exists():
+                    try:
+                        module = importlib.import_module(f'protocols.quiet.events.{event_type}.validator')
+                        self.validators[event_type] = module
+                        print(f"Loaded validator for {event_type}")
+                    except ImportError as e:
+                        print(f"Failed to load {event_type} validator: {e}")
+                    except Exception as e:
+                        print(f"Error loading {event_type} validator: {e}")

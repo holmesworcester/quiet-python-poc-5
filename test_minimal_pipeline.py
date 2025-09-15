@@ -11,7 +11,7 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from core.processor import PipelineRunner
+from core.pipeline import PipelineRunner
 from core.db import get_connection
 
 def test_minimal_pipeline():
@@ -48,7 +48,7 @@ def test_minimal_pipeline():
         runner = PipelineRunner(db_path=str(db_path), verbose=True)
         
         # Check which handlers are registered
-        from core.handler import registry
+        from core.handlers import registry
         print(f"Handlers before loading: {[h.name for h in registry._handlers]}")
         
         # Add more detailed logging

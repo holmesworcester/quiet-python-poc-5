@@ -1,11 +1,14 @@
 """
 Queries for channel event type.
 """
+from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
+from core.queries import query
 
 
-def list_channels(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
+@query
+def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     List all channels.
     
@@ -29,7 +32,7 @@ def list_channels(params: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[s
     
     query += " ORDER BY created_at DESC"
     
-    cursor = db.execute(query, query_params)
+    cursor = db.execute(query, tuple(query_params))
     
     channels = []
     for row in cursor:

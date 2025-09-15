@@ -4,13 +4,14 @@ Tests for project handler.
 import pytest
 import sys
 from pathlib import Path
+from typing import Dict, Any
 
 # Add project root to path
 protocol_dir = Path(__file__).parent.parent.parent
 project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.handlers.project.handler import ProjectHandler
+from protocols.quiet.handlers.project import ProjectHandler
 
 
 class TestProjectHandler:
@@ -25,7 +26,7 @@ class TestProjectHandler:
     @pytest.mark.handler
     def test_filter_requires_validated(self, handler):
         """Test filter requires validated to be true."""
-        envelope = {
+        envelope: Dict[str, Any] = {
             "event_type": "identity",
             "event_plaintext": {"type": "identity"}
         }
@@ -41,7 +42,7 @@ class TestProjectHandler:
     @pytest.mark.handler
     def test_filter_skips_projected(self, handler):
         """Test filter skips already projected envelopes."""
-        envelope = {
+        envelope: Dict[str, Any] = {
             "event_type": "identity",
             "event_plaintext": {"type": "identity"},
             "validated": True,

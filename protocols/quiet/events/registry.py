@@ -82,10 +82,10 @@ class InviteEventData(TypedDict):
     """Invite event data structure"""
     type: Literal["invite"]
     invite_id: str
+    invite_pubkey: str
     group_id: str
     network_id: str
     inviter_id: str
-    invitee_id: str
     created_at: int
     signature: str
 
@@ -95,8 +95,10 @@ class UserEventData(TypedDict):
     user_id: str
     peer_id: str
     network_id: str
-    address: str
-    port: int
+    group_id: str
+    name: str
+    invite_pubkey: str
+    invite_signature: str
     created_at: int
     signature: str
 

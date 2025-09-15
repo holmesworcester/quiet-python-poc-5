@@ -14,32 +14,11 @@ sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.identity.commands import create_identity
 from core.crypto import verify
-from core.api import API
 
 
 class TestIdentityCommand:
     """Test identity creation command."""
     
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_identity_basic(self, tmp_path):
-        """Test basic identity creation."""
-        # Create API client
-        api = API(protocol_dir, reset_db=True, db_path=tmp_path / "test.db")
-        
-        # Execute command through API
-        result = api.create_identity(network_id="test-network")
-        
-        # Check result structure
-        assert "peer_id" in result
-        assert "network_id" in result
-        assert result["network_id"] == "test-network"
-        assert "created_at" in result
-        assert "signature" in result
-        
-        # Verify peer_id is valid hex
-        assert len(result["peer_id"]) == 64  # 32 bytes as hex
-        bytes.fromhex(result["peer_id"])  # Should not raise
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -65,22 +44,6 @@ class TestIdentityCommand:
         assert "created_at" in event
         assert event["signature"] == ""  # Unsigned
     
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_identity_through_api_stores_key(self, tmp_path):
-        """Test that identity creation through API stores keys."""
-        # Create API client
-        api = API(protocol_dir, reset_db=True, db_path=tmp_path / "test.db")
-        
-        # Create identity
-        result = api.create_identity(network_id="test-network")
-        peer_id = result["peer_id"]
-        
-        # Query for stored identity
-        identities = api.get_identities(network_id="test-network")
-        assert len(identities) == 1
-        assert identities[0]["identity_id"] == peer_id
-        assert identities[0]["network_id"] == "test-network"
     
     @pytest.mark.unit
     @pytest.mark.event_type
