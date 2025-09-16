@@ -22,7 +22,7 @@ def sync_request_job(state: Dict, db: sqlite3.Connection, time_now_ms: int) -> T
         identity_networks = cursor.execute("""
             SELECT DISTINCT u.user_id as identity_id, u.network_id
             FROM users u
-            INNER JOIN identities i ON u.user_id = i.identity_id
+            INNER JOIN core_identities i ON u.user_id = i.identity_id
             WHERE u.network_id != ''
         """).fetchall()
 

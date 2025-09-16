@@ -162,17 +162,8 @@ class API:
                                 # Register with event_type.function_name format
                                 func_name = getattr(obj, '_original_name', name)
 
-                                # Map common function names to simpler forms
-                                if func_name.startswith('create_'):
-                                    # create_user -> user.create
-                                    simple_name = 'create'
-                                elif func_name.startswith('join_'):
-                                    # join_as_user -> user.join
-                                    simple_name = 'join'
-                                else:
-                                    simple_name = func_name
-
-                                operation_id = f'{event_type}.{simple_name}'
+                                # Simple consistent mapping: event_type.function_name
+                                operation_id = f'{event_type}.{func_name}'
                                 command_registry.register(operation_id, obj)
 
                                 # Also register response handlers if they exist
@@ -241,7 +232,8 @@ class API:
 
             if response_handler:
                 # Let the command shape its own response with query data
-                return response_handler(stored_ids, params or {}, db)
+                from typing import Dict as _Dict, Any as _Any, cast as _cast
+                return _cast(_Dict[str, _Any], response_handler(stored_ids, params or {}, db))
             else:
                 # Fallback to standard response with just IDs
                 return {
@@ -259,9 +251,10 @@ class API:
             from core import identity
 
             if hasattr(identity, operation_id):
+                from typing import Dict as _Dict, Any as _Any, Callable as _Callable, cast as _cast
                 func = getattr(identity, operation_id)
                 # Execute the core command directly with db_path
-                return func(params or {}, str(self.db_path))
+                return _cast(_Dict[str, _Any], func(params or {}, str(self.db_path)))
             else:
                 raise ValueError(f"Unknown core command: {operation_id}")
 

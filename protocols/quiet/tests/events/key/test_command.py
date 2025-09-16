@@ -23,10 +23,10 @@ class TestKeyCommand:
     @pytest.fixture
     def identity_in_db(self, initialized_db):
         """Create an identity in the database for testing."""
-        # Create identity
-        params = {"network_id": "test-network"}
-        envelope = create_identity(params)
-        identity_id = envelope["event_plaintext"]["peer_id"]
+        # Create identity in the initialized test database
+        db_path = initialized_db.execute("PRAGMA database_list").fetchone()[2]
+        identity = create_identity("Test User", db_path)
+        identity_id = identity.id
         
         return {
             "identity_id": identity_id,

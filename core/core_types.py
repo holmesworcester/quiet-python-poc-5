@@ -86,7 +86,7 @@ class HandlerDef(TypedDict):
     handler: HandlerFunc
 
 
-def command(func: Callable[[dict[str, Any]], Any]) -> Callable[[dict[str, Any]], Any]:
+def command(func: Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]) -> Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]:
     """
     Decorator to mark command functions.
 
@@ -123,7 +123,7 @@ def command(func: Callable[[dict[str, Any]], Any]) -> Callable[[dict[str, Any]],
         return result
 
     wrapper._is_command = True  # type: ignore
-    wrapper._original_name = func.__name__  # Store original name
+    wrapper._original_name = func.__name__  # type: ignore[attr-defined]
 
     # Auto-register is now done during discovery to get proper event_type context
 
@@ -252,7 +252,10 @@ def command_response(func: Callable[[str, list[dict[str, Any]], Any], dict[str, 
     return wrapper
 
 
-def response_handler(command_name: str):
+from typing import Callable as _Callable
+
+
+def response_handler(command_name: str) -> _Callable[[Callable[[dict[str, Any], dict[str, Any], Any], dict[str, Any]]], Callable[[dict[str, Any], dict[str, Any], Any], dict[str, Any]]]:
     """
     Decorator to register a response handler for a command.
 
@@ -262,7 +265,7 @@ def response_handler(command_name: str):
     - params: Original command parameters
     - db: Database connection for running queries
     """
-    def decorator(func: Callable[[dict[str, str], dict[str, Any], Any], dict[str, Any]]) -> Callable:
+    def decorator(func: Callable[[dict[str, str], dict[str, Any], Any], dict[str, Any]]) -> Callable[[dict[str, str], dict[str, Any], Any], dict[str, Any]]:
         import functools
         import inspect
 

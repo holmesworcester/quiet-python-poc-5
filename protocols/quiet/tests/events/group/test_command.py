@@ -2,131 +2,180 @@
 Tests for group commands.
 """
 import pytest
-import sys
+import tempfile
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))))
-
 from protocols.quiet.events.group.commands import create_group
-from protocols.quiet.tests.test_commands_base import CommandTestBase
+from core.db import get_connection, init_database
 
 
-class TestGroupCommands(CommandTestBase):
+class TestGroupCommands:
     """Test group commands."""
-    
+
+    def setup_method(self):
+        """Set up test database."""
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        os.close(self.db_fd)
+        self.db = get_connection(self.db_path)
+
+        # Get the protocol directory properly
+        import pathlib
+        test_dir = pathlib.Path(__file__).parent
+        protocol_dir = test_dir.parent.parent.parent
+        init_database(self.db, str(protocol_dir))
+
+        # Set up test data
+        self.peer_id = 'test_peer_id'
+        self.network_id = 'test_network_id'
+
+    def teardown_method(self):
+        """Clean up test database."""
+        self.db.close()
+        os.unlink(self.db_path)
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
     def test_create_group_envelope_structure(self):
         """Test that create_group generates correct envelope structure."""
         params = {
-            'name': 'Test Community',
-            'network_id': 'test_network',
-            'identity_id': 'test_identity_id'
+            'name': 'My Group',
+            'network_id': self.network_id,
+            'peer_id': self.peer_id
         }
-        
-        envelope = create_group(params)
-        
+
+        envelopes = create_group(params)
+
+        # Should return a list with one envelope (group only)
+        assert len(envelopes) == 1
+
+        envelope = envelopes[0]
+
         # Check envelope structure
         assert envelope['event_type'] == 'group'
         assert envelope['self_created'] == True
-        assert envelope['peer_id'] == 'test_identity_id'
-        assert envelope['network_id'] == 'test_network'
-        assert envelope['deps'] == []  # Groups have no dependencies
-        
+        assert envelope['peer_id'] == self.peer_id
+        assert envelope['network_id'] == self.network_id
+
+        # Check dependencies (group has no dependencies)
+        assert envelope['deps'] == []
+
         # Check event structure
         event = envelope['event_plaintext']
         assert event['type'] == 'group'
-        assert event['name'] == 'Test Community'
-        assert event['network_id'] == 'test_network'
-        assert event['creator_id'] == 'test_identity_id'
         assert event['group_id'] == ''  # Will be filled by encrypt handler
+        assert event['name'] == 'My Group'
+        assert event['network_id'] == self.network_id
+        assert event['creator_id'] == self.peer_id
         assert 'created_at' in event
         assert event['signature'] == ''  # Not signed yet
-        
-        print("✓ create_group envelope structure test passed")
-    
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
     def test_create_group_no_dependencies(self):
         """Test that create_group has no dependencies."""
         params = {
-            'name': 'Independent Group',
-            'network_id': 'test_network',
-            'identity_id': 'identity_abc123'
+            'name': 'Test Group',
+            'network_id': self.network_id,
+            'peer_id': self.peer_id
         }
-        
-        envelope = create_group(params)
-        
-        # Groups should not depend on any other events
-        assert envelope['deps'] == [], "Groups should have no dependencies"
-        
-        print("✓ create_group no dependencies test passed")
 
-    def test_create_group_api_response(self):
-        """Test that create_group returns list of all groups via API."""
-        from core.api import API
-        from pathlib import Path
+        envelopes = create_group(params)
+        envelope = envelopes[0]
 
-        # Initialize API with test database
-        api = API(Path('protocols/quiet'), reset_db=True)
+        # Group should have no dependencies
+        assert envelope['deps'] == []
 
-        # First create an identity (required for group creation)
-        identity_result = api.create_identity({
-            'name': 'Alice',
-            'network_id': 'test_net'
-        })
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_group_missing_peer_id(self):
+        """Test that create_group requires peer_id."""
+        params = {
+            'name': 'My Group',
+            'network_id': self.network_id
+            # Missing peer_id
+        }
 
-        identity_id = identity_result['ids']['identity']
+        with pytest.raises(ValueError, match="peer_id is required"):
+            create_group(params)
 
-        # Create first group
-        group1_result = api.create_group({
-            'name': 'First Group',
-            'network_id': 'test_net',
-            'identity_id': identity_id
-        })
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_group_default_name(self):
+        """Test that create_group uses default name if not provided."""
+        params = {
+            # No name
+            'network_id': self.network_id,
+            'peer_id': self.peer_id
+        }
 
-        # Check that response includes groups list
-        assert 'groups' in group1_result, "Response should include groups list"
-        assert len(group1_result['groups']) >= 1, "Should have at least one group"
+        envelopes = create_group(params)
+        envelope = envelopes[0]
 
-        # Create second group
-        group2_result = api.create_group({
-            'name': 'Second Group',
-            'network_id': 'test_net',
-            'identity_id': identity_id
-        })
+        event = envelope['event_plaintext']
+        assert event['name'] == 'unnamed-group'
 
-        # Check that response includes both groups
-        assert 'groups' in group2_result, "Response should include groups list"
-        assert len(group2_result['groups']) >= 2, "Should have at least two groups"
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_group_empty_name(self):
+        """Test that create_group handles empty name."""
+        params = {
+            'name': '',  # Empty name
+            'network_id': self.network_id,
+            'peer_id': self.peer_id
+        }
 
-        # Verify both groups are in the list
-        group_names = [g['name'] for g in group2_result['groups']]
-        assert 'First Group' in group_names, "First group should be in list"
-        assert 'Second Group' in group_names, "Second group should be in list"
+        envelopes = create_group(params)
+        envelope = envelopes[0]
 
-        print(f"✓ create_group returned {len(group2_result['groups'])} groups")
-        print("✓ create_group API response test passed")
+        event = envelope['event_plaintext']
+        assert event['name'] == 'unnamed-group'
 
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_group_default_network(self):
+        """Test that create_group uses default network if not provided."""
+        params = {
+            'name': 'My Group',
+            # No network_id
+            'peer_id': self.peer_id
+        }
 
-def run_tests():
-    """Run all group command tests."""
-    test = TestGroupCommands()
-    
-    print("=" * 60)
-    print("Testing Group Commands")
-    print("=" * 60)
-    
-    print("\n1. Testing create_group envelope structure:")
-    print("-" * 40)
-    test.test_create_group_envelope_structure()
-    
-    print("\n2. Testing create_group no dependencies:")
-    print("-" * 40)
-    test.test_create_group_no_dependencies()
+        envelopes = create_group(params)
+        envelope = envelopes[0]
 
-    print("\n3. Testing create_group API response with query data:")
-    print("-" * 40)
-    test.test_create_group_api_response()
+        event = envelope['event_plaintext']
+        assert event['network_id'] == 'dummy-network-id'
+        assert envelope['network_id'] == 'dummy-network-id'
 
-    print("\n" + "=" * 60)
-    print("Group command tests complete!")
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_group_timestamp(self):
+        """Test that create_group includes timestamp."""
+        params = {
+            'name': 'My Group',
+            'network_id': self.network_id,
+            'peer_id': self.peer_id
+        }
 
+        envelopes = create_group(params)
+        envelope = envelopes[0]
 
-if __name__ == "__main__":
-    run_tests()
+        event = envelope['event_plaintext']
+        assert 'created_at' in event
+        assert isinstance(event['created_at'], int)
+        assert event['created_at'] > 0
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_group_returns_list(self):
+        """Test that create_group returns a list of envelopes."""
+        params = {
+            'name': 'My Group',
+            'network_id': self.network_id,
+            'peer_id': self.peer_id
+        }
+
+        result = create_group(params)
+
+        # Should return a list
+        assert isinstance(result, list)
+        assert len(result) == 1  # Only group event now (member created separately)

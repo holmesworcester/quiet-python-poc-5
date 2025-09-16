@@ -10,7 +10,7 @@ from core.db import ReadOnlyConnection
 def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Get networks with optional filtering."""
     query = "SELECT * FROM networks WHERE 1=1"
-    query_params = []
+    query_params: List[Any] = []
 
     # Filter by network_id if provided
     if 'network_id' in params:
@@ -22,7 +22,7 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         query += " AND peer_id = ?"
         query_params.append(params['peer_id'])
 
-    cursor = db.execute(query, query_params)
+    cursor = db.execute(query, tuple(query_params))
     columns = [desc[0] for desc in cursor.description]
     results = []
     

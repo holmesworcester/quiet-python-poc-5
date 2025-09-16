@@ -2,7 +2,7 @@
 Commands for address event type.
 """
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, cast
 from core.core_types import command
 
 
@@ -66,13 +66,13 @@ def create_address_add(peer_id: str, ip: str, port: int = 5000,
     if timestamp_ms is None:
         timestamp_ms = int(time.time() * 1000)
 
-    return announce_address({
+    return cast(Dict[str, Any], announce_address({
         'peer_id': peer_id,
         'ip': ip,
         'port': port,
         'action': 'add',
         'network_id': network_id
-    })
+    }))
 
 
 def create_address_remove(peer_id: str, ip: str, port: int = 5000,
@@ -93,10 +93,10 @@ def create_address_remove(peer_id: str, ip: str, port: int = 5000,
     if timestamp_ms is None:
         timestamp_ms = int(time.time() * 1000)
 
-    return announce_address({
+    return cast(Dict[str, Any], announce_address({
         'peer_id': peer_id,
         'ip': ip,
         'port': port,
         'action': 'remove',
         'network_id': network_id
-    })
+    }))

@@ -5,7 +5,7 @@ import uuid
 from core.pipeline import PipelineRunner
 
 
-def test_user_creation():
+def test_user_creation() -> None:
     """Test that create_network creates user events with existing identity."""
 
     db = sqlite3.connect(':memory:')

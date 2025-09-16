@@ -23,10 +23,10 @@ class TestTransitSecretCommand:
     @pytest.fixture
     def identity_in_db(self, initialized_db):
         """Create an identity in the database for testing."""
-        # Create identity
-        params = {"network_id": "test-network"}
-        envelope = create_identity(params)
-        identity_id = envelope["event_plaintext"]["peer_id"]
+        # Create identity in the initialized test database
+        db_path = initialized_db.execute("PRAGMA database_list").fetchone()[2]
+        identity = create_identity("Test User", db_path)
+        identity_id = identity.id
         
         return {
             "identity_id": identity_id,
@@ -56,7 +56,7 @@ class TestTransitSecretCommand:
         event = envelope["event_plaintext"]
         assert event["type"] == "transit_secret"
         assert event["network_id"] == "test-network"
-        assert event["peer_id"] == identity_in_db["identity_id"]
+        assert event["identity_id"] == identity_in_db["identity_id"]
         assert event["transit_key_id"] == ""  # Empty until handlers process
         assert "created_at" in event
         assert event["signature"] == ""  # Empty until handlers process
@@ -86,8 +86,8 @@ class TestTransitSecretCommand:
         }
 
         envelope = create_transit_secret(params)
-        assert envelope["event_plaintext"]["peer_id"] == ""
-        assert envelope["peer_id"] == ""
+        assert envelope["event_plaintext"]["identity_id"] == ""
+        assert envelope["identity_id"] == ""
     
     @pytest.mark.unit
     @pytest.mark.event_type
@@ -99,8 +99,8 @@ class TestTransitSecretCommand:
         }
 
         envelope = create_transit_secret(params)
-        assert envelope["event_plaintext"]["peer_id"] == "non-existent-identity"
-        assert envelope["peer_id"] == "non-existent-identity"
+        assert envelope["event_plaintext"]["identity_id"] == "non-existent-identity"
+        assert envelope["identity_id"] == "non-existent-identity"
     
     
     @pytest.mark.unit
@@ -137,5 +137,5 @@ class TestTransitSecretCommand:
         # Required fields for pipeline
         assert envelope["event_type"] == "transit_secret"
         assert envelope["self_created"] == True
-        assert envelope["peer_id"] == identity_in_db["identity_id"]
+        assert envelope["identity_id"] == identity_in_db["identity_id"]
         assert envelope["network_id"] == identity_in_db["network_id"]

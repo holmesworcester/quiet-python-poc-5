@@ -3,7 +3,7 @@
 import json
 import sqlite3
 import time
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Callable
 from core.handlers import Handler
 
 
@@ -14,17 +14,17 @@ class JobHandler(Handler):
     def name(self) -> str:
         return "job"
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.jobs = self._load_jobs()
+        self.jobs: Dict[str, Callable[[Dict[str, Any], sqlite3.Connection, int], Tuple[bool, Dict[str, Any], List[Dict[str, Any]]]]] = self._load_jobs()
 
-    def _load_jobs(self) -> Dict[str, callable]:
+    def _load_jobs(self) -> Dict[str, Callable[[Dict[str, Any], sqlite3.Connection, int], Tuple[bool, Dict[str, Any], List[Dict[str, Any]]]]]:
         """Dynamically load all job functions from event directories."""
         import os
         import importlib
         from pathlib import Path
 
-        jobs = {}
+        jobs: Dict[str, Callable[[Dict[str, Any], sqlite3.Connection, int], Tuple[bool, Dict[str, Any], List[Dict[str, Any]]]]] = {}
 
         # Find the events directory
         events_dir = Path(__file__).parent.parent / 'events'

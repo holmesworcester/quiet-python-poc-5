@@ -76,3 +76,4 @@ i'm really not convinced about where to put identities.
 should pubkey get resolved as a dependency so that sign just has the pk in the envelope?
 shoudl we go back to having an identity event like any other with its own table and we just don't share it and exempt it from usual checks?
 should identity be a handler and create identity is an envelope that gets emitted by a command, and then filled in by the handler?
+

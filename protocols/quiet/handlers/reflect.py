@@ -2,7 +2,7 @@
 
 import sqlite3
 import time
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Callable
 from core.handlers import Handler
 
 
@@ -13,17 +13,17 @@ class ReflectHandler(Handler):
     def name(self) -> str:
         return "reflect"
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.reflectors = self._load_reflectors()
+        self.reflectors: Dict[str, Callable[[Dict[str, Any], sqlite3.Connection, int], tuple[bool, List[Dict[str, Any]]]]] = self._load_reflectors()
 
-    def _load_reflectors(self) -> Dict[str, callable]:
+    def _load_reflectors(self) -> Dict[str, Callable[[Dict[str, Any], sqlite3.Connection, int], tuple[bool, List[Dict[str, Any]]]]]:
         """Dynamically load all reflector functions from event directories."""
         import os
         import importlib
         from pathlib import Path
 
-        reflectors = {}
+        reflectors: Dict[str, Callable[[Dict[str, Any], sqlite3.Connection, int], tuple[bool, List[Dict[str, Any]]]]] = {}
 
         # Find the events directory
         events_dir = Path(__file__).parent.parent / 'events'
@@ -64,10 +64,12 @@ class ReflectHandler(Handler):
         """Process validated events that have reflectors."""
         event_type = envelope.get('event_type')
         # Only process incoming, validated events (not our outgoing ones)
-        return (event_type in self.reflectors and
-                envelope.get('validated') and
-                not envelope.get('is_outgoing') and
-                envelope.get('event_plaintext'))
+        return (
+            (event_type in self.reflectors)
+            and bool(envelope.get('validated'))
+            and (not bool(envelope.get('is_outgoing')))
+            and bool(envelope.get('event_plaintext'))
+        )
 
     def process(self, envelope: Dict[str, Any], db: sqlite3.Connection) -> List[Dict[str, Any]]:
         """Execute the appropriate reflector."""

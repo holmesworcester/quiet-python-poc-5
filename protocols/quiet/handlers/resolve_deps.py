@@ -107,8 +107,13 @@ def resolve_dependencies(envelope: dict[str, Any], db: sqlite3.Connection) -> Op
         # Filter out invite dependencies for self-created user events
         deps_needed = [dep for dep in deps_needed if not dep.startswith('invite:')]
 
-    # Check for placeholders in dependencies
-    has_placeholders = any(dep.startswith('@generated:') for dep in deps_needed)
+    # Try to resolve each dependency
+    resolved_deps = {}
+    missing_deps = []
+
+    # Check for placeholders in dependencies or peer_id
+    has_placeholders = (any(dep.startswith('@generated:') for dep in deps_needed) or
+                       envelope.get('peer_id', '').startswith('@generated:'))
 
     if has_placeholders:
         # Try to resolve placeholders from completed events in the same request
@@ -129,11 +134,15 @@ def resolve_dependencies(envelope: dict[str, Any], db: sqlite3.Connection) -> Op
                 resolved_peer_id = resolve_single_placeholder(peer_id, request_id, db)
                 if resolved_peer_id:
                     envelope['peer_id'] = resolved_peer_id
+                    # Also update in event_plaintext
+                    if 'event_plaintext' in envelope:
+                        envelope['event_plaintext']['peer_id'] = resolved_peer_id
+                else:
+                    # Can't resolve yet, mark as having missing dependencies
+                    print(f"[resolve_deps] Could not resolve {peer_id} for request {request_id}")
+                    missing_deps.append(peer_id)
 
-    # Try to resolve each dependency
-    resolved_deps = {}
-    missing_deps = []
-
+    # Continue resolving other dependencies
     for dep_ref in deps_needed:
         # Skip unresolved placeholders
         if dep_ref.startswith('@generated:'):
@@ -371,7 +380,8 @@ def resolve_single_placeholder(placeholder: str, request_id: str, db: sqlite3.Co
     event_type = parts[1]
     index = int(parts[2])
 
-    # Look for completed events of this type in the same request
+    # Look for validated events of this type in the same request
+    # These are tracked when events validate during pipeline processing
     cursor = db.execute("""
         SELECT event_id FROM completed_events
         WHERE event_type = ?
@@ -398,7 +408,7 @@ def resolve_placeholders_in_list(items: List[str], request_id: str, db: sqlite3.
 
 def resolve_placeholders_in_dict(data: Dict[str, Any], request_id: str, db: sqlite3.Connection) -> Dict[str, Any]:
     """Recursively resolve placeholders in a dictionary."""
-    result = {}
+    result: Dict[str, Any] = {}
     for key, value in data.items():
         if isinstance(value, str) and value.startswith('@generated:'):
             resolved = resolve_single_placeholder(value, request_id, db)
@@ -472,7 +482,7 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
         # For peer events, always check peers table first to get full data
         # First try to find by peer_id (most common case)
         cursor = db.execute("""
-            SELECT peer_id, public_key, identity_id, network_id, created_at
+            SELECT peer_id, public_key, identity_id, created_at
             FROM peers
             WHERE peer_id = ?
         """, (dep_id,))
@@ -483,7 +493,7 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
         # try looking up by identity_id (for legacy compatibility)
         if not row and len(dep_id) == 32:  # Could be an identity_id
             cursor = db.execute("""
-                SELECT peer_id, public_key, identity_id, network_id, created_at
+                SELECT peer_id, public_key, identity_id, created_at
                 FROM peers
                 WHERE identity_id = ?
                 LIMIT 1
@@ -491,13 +501,12 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
             row = cursor.fetchone()
 
         if row:
-            # row columns: peer_id, public_key, identity_id, network_id, created_at
+            # row columns: peer_id, public_key, identity_id, created_at
             event_plaintext = {
                 'type': 'peer',
                 'public_key': row[1],  # public_key
                 'identity_id': row[2],  # identity_id
-                'network_id': row[3],  # network_id
-                'created_at': row[4]  # created_at
+                'created_at': row[3]  # created_at
             }
             # Also update the event's peer_id to the actual peer_id if we resolved by identity
             actual_peer_id = row[0]

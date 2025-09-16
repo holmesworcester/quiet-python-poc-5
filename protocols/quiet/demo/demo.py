@@ -131,17 +131,17 @@ class QuietDemoCore:
         try:
             # Get all entities via API operations only
             try:
-                self._cache['identities'] = self.api.execute_operation('get_identities', {})
+                self._cache['identities'] = self.api.execute_operation('core.identity_list', {})
             except:
                 self._cache['identities'] = []
 
             try:
-                self._cache['transit_keys'] = self.api.execute_operation('list_transit_keys', {})
+                self._cache['transit_keys'] = self.api.execute_operation('transit_secret.list', {})
             except:
                 self._cache['transit_keys'] = []
 
             try:
-                self._cache['keys'] = self.api.execute_operation('list_keys', {})
+                self._cache['keys'] = self.api.execute_operation('key.list', {})
             except:
                 self._cache['keys'] = []
 
@@ -170,7 +170,7 @@ class QuietDemoCore:
 
             try:
                 if query_identity and network_id:
-                    groups_result = self.api.execute_operation('get_groups', {
+                    groups_result = self.api.execute_operation('group.get', {
                         'identity_id': query_identity,
                         'network_id': network_id
                     })
@@ -193,7 +193,7 @@ class QuietDemoCore:
                 if query_identity and self._cache['groups']:
                     for group in self._cache['groups']:
                         try:
-                            channels_result = self.api.execute_operation('get_channels', {
+                            channels_result = self.api.execute_operation('channel.get', {
                                 'identity_id': query_identity,
                                 'group_id': group['group_id']
                             })
@@ -299,7 +299,7 @@ class QuietDemoCore:
             if not identity_id or not channel_id:
                 return []
 
-            result = self.api.execute_operation('get_messages', {
+            result = self.api.execute_operation('message.get', {
                 'identity_id': identity_id,
                 'channel_id': channel_id,
                 'limit': 50  # Last 50 messages
@@ -321,7 +321,7 @@ class QuietDemoCore:
             if not identity_id or not network_id:
                 return []
 
-            result = self.api.execute_operation('get_users', {
+            result = self.api.execute_operation('user.get', {
                 'identity_id': identity_id,
                 'network_id': network_id
             })
@@ -378,7 +378,7 @@ class QuietDemoCore:
             username = name or f'User-{panel_id}'
 
             # First create core identity (core framework function)
-            result = self.api.execute_operation('core_identity_create', {'name': username})
+            result = self.api.execute_operation('core.identity_create', {'name': username})
 
             if not result or 'ids' not in result or 'identity' not in result['ids']:
                 return CommandResult(False, error="Failed to create identity")
@@ -386,7 +386,7 @@ class QuietDemoCore:
             identity_id = result['ids']['identity']
 
             # Now create a peer for this identity (peer represents identity in protocol)
-            peer_result = self.api.execute_operation('create_peer', {
+            peer_result = self.api.execute_operation('peer.create_peer', {
                 'identity_id': identity_id,
                 'username': username
             })
@@ -431,7 +431,7 @@ class QuietDemoCore:
 
         try:
             # Create network using the peer_id (networks depend on peers)
-            result = self.api.execute_operation("create_network", {
+            result = self.api.execute_operation("network.create_network", {
                 "name": name,
                 "peer_id": panel.peer_id
             })
@@ -446,14 +446,14 @@ class QuietDemoCore:
             panel.network_id = network_id
 
             # Create user event to join the network
-            user_result = self.api.execute_operation("create_user", {
+            user_result = self.api.execute_operation("user.create_user", {
                 "peer_id": panel.peer_id,
                 "network_id": network_id,
                 "name": panel.identity_name
             })
 
             # Create default group
-            group_result = self.api.execute_operation("create_group", {
+            group_result = self.api.execute_operation("group.create_group", {
                 "name": "public",
                 "network_id": network_id,
                 "peer_id": panel.peer_id
@@ -465,7 +465,7 @@ class QuietDemoCore:
                     panel.current_group = group_id
 
                     # Create default channel in the group
-                    channel_result = self.api.execute_operation("create_channel", {
+                    channel_result = self.api.execute_operation("channel.create_channel", {
                         "name": "general",
                         "group_id": group_id,
                         "peer_id": panel.peer_id,
@@ -509,7 +509,7 @@ class QuietDemoCore:
                     panel.current_group = self._cache['groups'][0]['group_id']
 
             # Execute the create_invite operation through the API
-            result = self.api.execute_operation("create_invite", {
+            result = self.api.execute_operation("invite.create_invite", {
                 "network_id": panel.network_id,
                 "peer_id": panel.peer_id,
                 "group_id": panel.current_group or ""  # Use current group if available
@@ -547,7 +547,7 @@ class QuietDemoCore:
             username = panel.identity_name or f"User-{panel_id}"
 
             # Use join_as_user which creates identity, peer, and user all at once
-            result = self.api.execute_operation("join_as_user", {
+            result = self.api.execute_operation("user.join_as_user", {
                 "invite_link": invite_code,
                 "name": username
             })
@@ -671,7 +671,7 @@ class QuietDemoCore:
                     self.refresh_state(force=True)
 
                     # Create default channel in the group
-                    channel_result = self.api.execute_operation("create_channel", {
+                    channel_result = self.api.execute_operation("channel.create_channel", {
                         "name": "general",
                         "group_id": group_id,
                         "identity_id": panel.identity_id,
@@ -704,7 +704,7 @@ class QuietDemoCore:
             return CommandResult(False, error="No network selected")
 
         try:
-            result = self.api.execute_operation("create_channel", {
+            result = self.api.execute_operation("channel.create_channel", {
                 "name": name,
                 "group_id": group_id,
                 "identity_id": panel.identity_id,
@@ -741,7 +741,7 @@ class QuietDemoCore:
             return CommandResult(False, error="No channel specified")
 
         try:
-            result = self.api.execute_operation("create_message", {
+            result = self.api.execute_operation("message.create_message", {
                 "content": text,
                 "channel_id": target_channel,
                 "peer_id": panel.peer_id

@@ -9,16 +9,9 @@ CREATE TABLE IF NOT EXISTS peers (
     -- The identity ID (hash of identity event)
     identity_id TEXT NOT NULL,
 
-    -- Network this peer belongs to
-    network_id TEXT NOT NULL,
-
     -- When the peer was created
     created_at INTEGER NOT NULL
 );
-
--- Index for querying peers by network
-CREATE INDEX IF NOT EXISTS idx_peers_network
-ON peers(network_id, created_at DESC);
 
 -- Index for looking up by identity_id
 CREATE INDEX IF NOT EXISTS idx_peers_identity

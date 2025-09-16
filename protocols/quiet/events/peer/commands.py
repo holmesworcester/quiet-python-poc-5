@@ -19,7 +19,6 @@ def create_peer(params: Dict[str, Any]) -> dict[str, Any]:
         raise ValueError("identity_id is required")
 
     username = params.get('username', 'User')
-    network_id = params.get('network_id', '')  # Can be empty initially
 
     # Get the public key from core identity
     from core.identity import get_identity
@@ -34,7 +33,6 @@ def create_peer(params: Dict[str, Any]) -> dict[str, Any]:
         'peer_id': '',  # Will be filled by crypto handler
         'public_key': identity.public_key.hex(),
         'identity_id': identity_id,
-        'network_id': network_id,  # Can be updated later
         'username': username,
         'created_at': int(time.time() * 1000),
         'signature': ''  # Will be filled by sign handler
@@ -47,6 +45,5 @@ def create_peer(params: Dict[str, Any]) -> dict[str, Any]:
         'event_plaintext': peer_event,
         'event_type': 'peer',
         'self_created': True,
-        'network_id': network_id,
         'deps': []  # Peer creation has no dependencies
     }

@@ -1,239 +1,181 @@
 """
-Tests for invite event type command (create).
+Tests for invite commands.
 """
 import pytest
-import sys
+import tempfile
+import os
+import base64
 import json
-from pathlib import Path
-
-# Add project root to path
-test_dir = Path(__file__).parent
-protocol_dir = test_dir.parent.parent.parent.parent
-project_root = protocol_dir.parent.parent
-sys.path.insert(0, str(project_root))
-
 from protocols.quiet.events.invite.commands import create_invite
-from core.identity import create_identity
-from core.crypto import verify, generate_keypair
-from core.pipeline import PipelineRunner
+from core.db import get_connection, init_database
 
 
-class TestInviteCommand:
-    """Test invite creation command."""
-    
-    @pytest.fixture
-    def test_identity(self):
-        """Create a test identity with keypair."""
-        private_key, public_key = generate_keypair()
-        return {
-            'identity_id': public_key.hex(),
-            'private_key': private_key,
-            'public_key': public_key
-        }
-    
+class TestInviteCommands:
+    """Test invite commands."""
+
+    def setup_method(self):
+        """Set up test database."""
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        os.close(self.db_fd)
+        self.db = get_connection(self.db_path)
+
+        # Get the protocol directory properly
+        import pathlib
+        test_dir = pathlib.Path(__file__).parent
+        protocol_dir = test_dir.parent.parent.parent
+        init_database(self.db, str(protocol_dir))
+
+        # Set up test data
+        self.peer_id = 'test_peer_id'
+        self.network_id = 'test_network_id'
+        self.group_id = 'test_group_id'
+
+    def teardown_method(self):
+        """Clean up test database."""
+        self.db.close()
+        os.unlink(self.db_path)
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_invite_basic(self, initialized_db):
-        """Test basic invite creation."""
-        # Mock identity with keypair
-        from core.crypto import generate_keypair
-        private_key, public_key = generate_keypair()
-        identity_id = public_key.hex()
-
+    def test_create_invite_envelope_structure(self):
+        """Test that create_invite generates correct envelope structure."""
         params = {
-            "network_id": "test-network",
-            "group_id": "test-group",
-            "identity_id": identity_id
+            'peer_id': self.peer_id,
+            'network_id': self.network_id,
+            'group_id': self.group_id
         }
 
         envelope = create_invite(params)
 
-        # Should emit exactly one envelope
-        # Single envelope returned
-
-        assert "event_plaintext" in envelope
-        assert "event_type" in envelope
-        assert envelope["event_type"] == "invite"
-        assert envelope["self_created"] == True
-
-        # Check event content
-        event = envelope["event_plaintext"]
-        assert event["type"] == "invite"
-        assert event["network_id"] == "test-network"
-        assert event["group_id"] == "test-group"
-        assert event["inviter_id"] == identity_id
-        assert "invite_id" in event
-        assert "invite_pubkey" in event
-        assert "created_at" in event
-        assert "signature" in event
-
-        # Verify invite_id and invite_pubkey are non-empty
-        assert len(event["invite_id"]) > 0
-        assert len(event["invite_pubkey"]) > 0
-
-        # Check envelope has invite_link
-        assert "invite_link" in envelope
-        assert envelope["invite_link"].startswith("quiet://invite/")
+        # Check envelope structure
+        assert envelope['event_type'] == 'invite'
+        assert envelope['self_created'] == True
+        assert envelope['peer_id'] == self.peer_id
+        assert envelope['network_id'] == self.network_id
 
         # Check dependencies
-        assert "deps" in envelope
-        assert f"group:{params['group_id']}" in envelope["deps"]
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_invite_with_group_id(self, initialized_db, test_identity):
-        """Test invite creation with specific group_id."""
-        group_id = "custom-group-123"
-        params = {
-            "network_id": "test-network",
-            "group_id": group_id,
-            "identity_id": test_identity['identity_id']
-        }
-
-        envelope = create_invite(params)
-        event = envelope["event_plaintext"]
-
-        assert event["group_id"] == group_id
-        assert f"group:{group_id}" in envelope["deps"]
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_invite_missing_network_id(self, initialized_db):
-        """Test invite creation with missing network_id (should still work)."""
-        params = {
-            "identity_id": "some-identity",
-            "group_id": "test-group"
-        }
-
-        envelope = create_invite(params)
-        event = envelope["event_plaintext"]
-
-        # Should work with empty network_id
-        assert event["network_id"] == ""
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_invite_missing_identity_id(self, initialized_db):
-        """Test invite creation with missing identity_id (should still work)."""
-        params = {
-            "network_id": "test-network",
-            "group_id": "test-group"
-        }
-
-        envelope = create_invite(params)
-        event = envelope["event_plaintext"]
-
-        # Should work with empty identity_id
-        assert event["inviter_id"] == ""
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_invite_missing_group_id(self, initialized_db):
-        """Test invite creation with missing group_id (should still work)."""
-        params = {
-            "network_id": "test-network",
-            "identity_id": "some-identity"
-        }
-
-        envelope = create_invite(params)
-        event = envelope["event_plaintext"]
-
-        # Should work with empty group_id
-        assert event["group_id"] == ""
-    
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_invite_event_structure(self, initialized_db):
-        """Test that invite event has correct structure."""
-        # Mock identity for testing
-        from core.crypto import generate_keypair
-        private_key, public_key = generate_keypair()
-        identity_id = public_key.hex()
-
-        params = {
-            "network_id": "test-network",
-            "group_id": "test-group",
-            "identity_id": identity_id
-        }
-
-        envelope = create_invite(params)
-
-        # Single envelope returned
-
-        event = envelope["event_plaintext"]
+        assert envelope['deps'] == [f"group:{self.group_id}"]
 
         # Check event structure
-        assert event["type"] == "invite"
-        assert event["network_id"] == "test-network"
-        assert event["group_id"] == "test-group"
-        assert event["inviter_id"] == identity_id
-        assert "invite_id" in event
-        assert "invite_pubkey" in event
-        assert "created_at" in event
-        assert "signature" in event
-    
+        event = envelope['event_plaintext']
+        assert event['type'] == 'invite'
+        assert event['inviter_id'] == self.peer_id
+        assert event['network_id'] == self.network_id
+        assert event['group_id'] == self.group_id
+        assert 'invite_pubkey' in event
+        assert 'invite_secret' in event
+        assert 'created_at' in event
+        assert event['signature'] == ''  # Not signed yet
+
+        # Check invite link
+        assert 'invite_link' in envelope
+        assert envelope['invite_link'].startswith('quiet://invite/')
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_invite_deterministic_keys(self, initialized_db, test_identity):
-        """Test that invite keys are deterministic based on secret."""
+    def test_create_invite_missing_peer_id(self):
+        """Test that create_invite requires peer_id."""
         params = {
-            "network_id": "test-network",
-            "group_id": "test-group",
-            "identity_id": test_identity['identity_id']
+            'network_id': self.network_id,
+            'group_id': self.group_id
+            # Missing peer_id
         }
 
+        with pytest.raises(ValueError, match="peer_id is required"):
+            create_invite(params)
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_invite_default_values(self):
+        """Test that create_invite uses default values."""
+        params = {
+            'peer_id': self.peer_id
+            # Minimal parameters
+        }
+
+        envelope = create_invite(params)
+
+        event = envelope['event_plaintext']
+        assert event['network_id'] == ''  # Default empty
+        assert event['group_id'] == ''  # Default empty
+
+        # Check dependencies with empty group_id
+        assert envelope['deps'] == ['group:']
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_invite_link_format(self):
+        """Test that invite link has correct format."""
+        params = {
+            'peer_id': self.peer_id,
+            'network_id': self.network_id,
+            'group_id': self.group_id
+        }
+
+        envelope = create_invite(params)
+
+        # Parse invite link
+        assert envelope['invite_link'].startswith('quiet://invite/')
+        link_data = envelope['invite_link'][len('quiet://invite/'):]
+
+        # Decode base64
+        decoded = base64.b64decode(link_data)
+        invite_data = json.loads(decoded)
+
+        # Check invite data structure
+        assert 'invite_secret' in invite_data
+        assert invite_data['network_id'] == self.network_id
+        assert invite_data['group_id'] == self.group_id
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_invite_unique_secrets(self):
+        """Test that each invite has unique secrets."""
+        params = {
+            'peer_id': self.peer_id,
+            'network_id': self.network_id,
+            'group_id': self.group_id
+        }
+
+        # Create two invites
         envelope1 = create_invite(params)
         envelope2 = create_invite(params)
 
-        event1 = envelope1["event_plaintext"]
-        event2 = envelope2["event_plaintext"]
+        event1 = envelope1['event_plaintext']
+        event2 = envelope2['event_plaintext']
 
-        # Each invite should have different secrets/keys
-        assert event1["invite_id"] != event2["invite_id"]
-        assert event1["invite_pubkey"] != event2["invite_pubkey"]
-        assert envelope1["invite_link"] != envelope2["invite_link"]
-    
+        # Each invite should have different secrets and pubkeys
+        assert event1['invite_secret'] != event2['invite_secret']
+        assert event1['invite_pubkey'] != event2['invite_pubkey']
+        assert envelope1['invite_link'] != envelope2['invite_link']
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_multiple_invites(self, initialized_db, test_identity):
-        """Test creating multiple invites from same identity."""
-        # Create first invite
-        envelope1 = create_invite({
-            "network_id": "test-network",
-            "group_id": "test-group",
-            "identity_id": test_identity['identity_id']
-        })
-        invite_id1 = envelope1["event_plaintext"]["invite_id"]
-
-        # Create second invite
-        envelope2 = create_invite({
-            "network_id": "test-network",
-            "group_id": "test-group",
-            "identity_id": test_identity['identity_id']
-        })
-        invite_id2 = envelope2["event_plaintext"]["invite_id"]
-
-        # Should have different invite IDs
-        assert invite_id1 != invite_id2
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_invite_envelope_structure(self, initialized_db, test_identity):
-        """Test that the envelope has correct structure for pipeline processing."""
+    def test_create_invite_timestamp(self):
+        """Test that create_invite includes timestamp."""
         params = {
-            "network_id": "test-network",
-            "group_id": "test-group",
-            "identity_id": test_identity['identity_id']
+            'peer_id': self.peer_id,
+            'network_id': self.network_id,
+            'group_id': self.group_id
         }
 
         envelope = create_invite(params)
 
-        # Required fields for pipeline
-        assert envelope["event_type"] == "invite"
-        assert envelope["self_created"] == True
-        assert envelope["peer_id"] == test_identity['identity_id']
-        assert envelope["network_id"] == "test-network"
-        assert envelope["invite_link"].startswith("quiet://invite/")
-        assert "deps" in envelope
-        assert f"group:{params['group_id']}" in envelope["deps"]
+        event = envelope['event_plaintext']
+        assert 'created_at' in event
+        assert isinstance(event['created_at'], int)
+        assert event['created_at'] > 0
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_invite_dependency(self):
+        """Test that create_invite depends on group."""
+        params = {
+            'peer_id': self.peer_id,
+            'network_id': self.network_id,
+            'group_id': 'group_123'
+        }
+
+        envelope = create_invite(params)
+
+        # Should depend only on group
+        assert len(envelope['deps']) == 1
+        assert envelope['deps'][0] == 'group:group_123'

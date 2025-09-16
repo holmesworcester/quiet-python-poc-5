@@ -33,7 +33,7 @@ paths:
   /peers:
     post:
       summary: Create a peer for an identity
-      operationId: peer.create
+      operationId: peer.create_peer
       requestBody:
         required: true
         content:
@@ -75,7 +75,7 @@ paths:
   /networks:
     post:
       summary: Create a new network
-      operationId: network.create
+      operationId: network.create_network
       requestBody:
         required: true
         content:
@@ -208,7 +208,7 @@ paths:
   /users/join:
     post:
       summary: Join a network as a user using an invite link
-      operationId: user.join
+      operationId: user.join_as_user
       requestBody:
         required: true
         content:
@@ -244,7 +244,7 @@ paths:
   /users:
     post:
       summary: Create a user event for an identity
-      operationId: user.create
+      operationId: user.create_user
       requestBody:
         required: true
         content:
@@ -324,7 +324,7 @@ paths:
   /groups:
     post:
       summary: Create a new group
-      operationId: group.create
+      operationId: group.create_group
       requestBody:
         required: true
         content:
@@ -420,7 +420,7 @@ paths:
   /channels:
     post:
       summary: Create a new channel in a group
-      operationId: channel.create
+      operationId: channel.create_channel
       requestBody:
         required: true
         content:
@@ -515,7 +515,7 @@ paths:
   /messages:
     post:
       summary: Create a new message
-      operationId: message.create
+      operationId: message.create_message
       requestBody:
         required: true
         content:
@@ -620,7 +620,7 @@ paths:
   /invites:
     post:
       summary: Create an invite to join a network
-      operationId: invite.create
+      operationId: invite.create_invite
       requestBody:
         required: true
         content:
@@ -675,7 +675,7 @@ paths:
   /groups/members:
     post:
       summary: Create a group member
-      operationId: member.create
+      operationId: member.create_member
       requestBody:
         required: true
         content:
@@ -716,7 +716,7 @@ paths:
   /keys:
     post:
       summary: Create a new encryption key for a group
-      operationId: key.create
+      operationId: key.create_key
       requestBody:
         required: true
         content:
@@ -789,7 +789,7 @@ paths:
   /transit-keys:
     post:
       summary: Create a new transit encryption key
-      operationId: transit_secret.create
+      operationId: transit_secret.create_transit_secret
       requestBody:
         required: true
         content:

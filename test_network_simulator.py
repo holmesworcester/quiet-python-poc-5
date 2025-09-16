@@ -4,7 +4,7 @@ import time
 from core.network_simulator import UDPNetworkSimulator, NetworkConfig
 
 
-def test_basic_send_receive():
+def test_basic_send_receive() -> None:
     """Test basic packet send and receive."""
     # Create simulator with no loss, no latency
     config = NetworkConfig(packet_loss_rate=0.0, latency_ms=0)
@@ -37,7 +37,7 @@ def test_basic_send_receive():
     print("✓ Basic send/receive works")
 
 
-def test_packet_latency():
+def test_packet_latency() -> None:
     """Test packet latency simulation."""
     # Create simulator with 50ms latency
     config = NetworkConfig(packet_loss_rate=0.0, latency_ms=50)
@@ -70,7 +70,7 @@ def test_packet_latency():
     print("✓ Latency simulation works")
 
 
-def test_packet_size_limit():
+def test_packet_size_limit() -> None:
     """Test packet size enforcement."""
     # Create simulator with 100 byte limit
     config = NetworkConfig(packet_loss_rate=0.0, latency_ms=0, max_packet_size=100)
@@ -108,7 +108,7 @@ def test_packet_size_limit():
     print("✓ Packet size limit works")
 
 
-def test_packet_loss():
+def test_packet_loss() -> None:
     """Test packet loss simulation."""
     # Create simulator with 50% packet loss
     config = NetworkConfig(packet_loss_rate=0.5, latency_ms=0)
@@ -139,7 +139,7 @@ def test_packet_loss():
     print(f"✓ Packet loss works (sent {sent_count}/100)")
 
 
-def test_multiple_destinations():
+def test_multiple_destinations() -> None:
     """Test sending to multiple destinations."""
     config = NetworkConfig(packet_loss_rate=0.0, latency_ms=10)
     sim = UDPNetworkSimulator(config)
@@ -172,7 +172,7 @@ def test_multiple_destinations():
     print("✓ Multiple destinations work")
 
 
-def test_time_advancement():
+def test_time_advancement() -> None:
     """Test the advance_time helper."""
     config = NetworkConfig(packet_loss_rate=0.0, latency_ms=30)
     sim = UDPNetworkSimulator(config)
@@ -201,7 +201,7 @@ def test_time_advancement():
     print("✓ Time advancement works")
 
 
-def test_transit_key_format():
+def test_transit_key_format() -> None:
     """Test that data format matches what ReceiveFromNetworkHandler expects."""
     config = NetworkConfig(packet_loss_rate=0.0, latency_ms=0)
     sim = UDPNetworkSimulator(config)

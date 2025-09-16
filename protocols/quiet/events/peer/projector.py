@@ -24,7 +24,6 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'peer_id': envelope.get('event_id', ''),  # Hash of event
                 'public_key': event_data.get('public_key', ''),
                 'identity_id': event_data.get('identity_id', ''),
-                'network_id': event_data.get('network_id', ''),
                 'created_at': event_data.get('created_at', 0)
             }
         }
