@@ -5,9 +5,10 @@ from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
 from core.queries import query
+from protocols.quiet.client import TransitKeyListParams, TransitKeyRecord
 
 
-@query
+@query(param_type=TransitKeyListParams, result_type=list[TransitKeyRecord])
 def list(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """List all transit keys, optionally filtered by network_id."""
     network_id = params.get('network_id')

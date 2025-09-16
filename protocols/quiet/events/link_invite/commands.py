@@ -4,9 +4,10 @@ Commands for link_invite event type.
 import time
 from typing import Dict, Any
 from core.core_types import command
+from protocols.quiet.client import CreateLinkInviteParams, CommandResponse
 
 
-@command
+@command(param_type=CreateLinkInviteParams, result_type=CommandResponse)
 def create_link_invite(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a link_invite event - the root event for linking a peer to a user.

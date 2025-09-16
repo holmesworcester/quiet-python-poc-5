@@ -42,6 +42,7 @@ class HandlerTestBase:
                 key_id TEXT,
                 unsealed_secret BLOB,
                 group_id TEXT,
+                network_id TEXT,
                 received_at INTEGER,
                 origin_ip TEXT,
                 origin_port INTEGER,
@@ -51,6 +52,16 @@ class HandlerTestBase:
                 purged_reason TEXT,
                 ttl_expire_at INTEGER,
                 validated BOOLEAN DEFAULT FALSE
+            )
+        """)
+
+        # Projected events (used by purge)
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS projected_events (
+                event_id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                projection_data TEXT NOT NULL,
+                projected_at INTEGER NOT NULL
             )
         """)
         
@@ -105,7 +116,17 @@ class HandlerTestBase:
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS deleted_channels (
                 channel_id TEXT PRIMARY KEY,
-                deleted_at INTEGER NOT NULL
+                deleted_at INTEGER NOT NULL,
+                deleted_by TEXT
+            )
+        """)
+
+        # Removed users
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS removed_users (
+                user_id TEXT PRIMARY KEY,
+                removed_at INTEGER NOT NULL,
+                removed_by TEXT
             )
         """)
 

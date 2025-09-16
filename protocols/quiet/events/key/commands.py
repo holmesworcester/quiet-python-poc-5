@@ -5,9 +5,10 @@ import time
 from typing import Dict, Any
 from core.crypto import generate_secret, seal, generate_keypair
 from core.core_types import command
+from protocols.quiet.client import CreateKeyParams, CommandResponse
 
 
-@command
+@command(param_type=CreateKeyParams, result_type=CommandResponse)
 def create_key(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a new encryption key for a group.

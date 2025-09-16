@@ -44,10 +44,8 @@ class TestUnblockDepsHandler(HandlerTestBase):
         )
         
         results = handler(envelope, self.db)
-        
-        # Should return original envelope
-        assert len(results) == 1
-        assert results[0] == envelope
+        # Missing deps lead to blocking with no emission
+        assert len(results) == 0
         
         # Check database
         cursor = self.db.execute(
@@ -115,12 +113,9 @@ class TestUnblockDepsHandler(HandlerTestBase):
         )
         
         results = handler(envelope, self.db)
-        
-        # Should return original plus unblocked
-        assert len(results) == 2
-        assert results[0] == envelope
-        
-        unblocked = results[1]
+        # Should return the unblocked envelope only
+        assert len(results) == 1
+        unblocked = results[0]
         assert unblocked['event_id'] == 'waiting_event'
         assert unblocked['unblocked'] is True
         assert unblocked['retry_count'] == 1
@@ -171,9 +166,8 @@ class TestUnblockDepsHandler(HandlerTestBase):
         
         results = handler(envelope, self.db)
         
-        # Should NOT unblock (dep2 still missing)
-        assert len(results) == 1
-        assert results[0] == envelope
+        # Should NOT unblock (dep2 still missing) and no emission from handler
+        assert len(results) == 0
         
         # Should still be blocked
         cursor = self.db.execute(
@@ -220,9 +214,8 @@ class TestUnblockDepsHandler(HandlerTestBase):
         
         results = handler(envelope, self.db)
         
-        # Should NOT unblock (exceeded retry limit)
-        assert len(results) == 1
-        assert results[0] == envelope
+        # Should NOT unblock (exceeded retry limit) and no emission
+        assert len(results) == 0
         
         # Should be removed from blocked_events
         cursor = self.db.execute(
@@ -241,8 +234,8 @@ class TestUnblockDepsHandler(HandlerTestBase):
         )
         
         results = handler(envelope, self.db)
-        
-        assert len(results) == 1
+        # Missing deps lead to blocking with no emission
+        assert len(results) == 0
         
         # Should be blocked
         cursor = self.db.execute(
@@ -288,4 +281,5 @@ class TestUnblockDepsHandler(HandlerTestBase):
             ("complex_deps",)
         )
         deps = [row['dep_id'] for row in cursor]
-        assert deps == ["group:main:456", "user:123"]
+        # Blocked dep ids are stored without prefixes in current schema
+        assert deps == ["123", "456"]

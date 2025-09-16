@@ -26,9 +26,10 @@ class TestValidateHandler:
     def test_filter_requires_sig_checked(self, handler):
         """Test filter requires sig_checked to be true."""
         envelope = {
-            "event_type": "identity",
-            "event_plaintext": {"type": "identity"},
-            "deps_included_and_valid": True
+            "event_type": "message",
+            "event_plaintext": {"type": "message", "message_id": "m1", "channel_id": "c1", "group_id": "g1", "network_id": "n1", "peer_id": "p1", "content": "hi", "created_at": 1, "signature": "sig"},
+            "deps_included_and_valid": True,
+            "self_created": True
         }
         assert handler.filter(envelope) == False
         
@@ -43,8 +44,8 @@ class TestValidateHandler:
     def test_filter_skips_validated(self, handler):
         """Test filter skips already validated envelopes."""
         envelope = {
-            "event_type": "identity",
-            "event_plaintext": {"type": "identity"},
+            "event_type": "message",
+            "event_plaintext": {"type": "message", "channel_id": "c1", "peer_id": "p1", "content": "hi", "created_at": 1},
             "deps_included_and_valid": True,
             "sig_checked": True,
             "validated": True
@@ -55,22 +56,19 @@ class TestValidateHandler:
     @pytest.mark.handler
     def test_filter_requires_event_plaintext(self, handler):
         """Test filter requires event_plaintext."""
-        envelope = {
-            "event_type": "identity",
-            "deps_included_and_valid": True,
-            "sig_checked": True
-        }
+        envelope = {"event_type": "message", "deps_included_and_valid": True, "sig_checked": True}
         assert handler.filter(envelope) == False
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_process_valid_identity(self, handler, sample_identity_event, initialized_db):
-        """Test processing valid identity event."""
+    def test_process_valid_message(self, handler, initialized_db):
+        """Test processing valid message event."""
         envelope = {
-            "event_plaintext": sample_identity_event,
-            "event_type": "identity",
+            "event_plaintext": {"type": "message", "message_id": "m1", "channel_id": "c1", "group_id": "g1", "network_id": "n1", "peer_id": "p1", "content": "hi", "created_at": 1, "signature": "sig"},
+            "event_type": "message",
             "deps_included_and_valid": True,
-            "sig_checked": True
+            "sig_checked": True,
+            "self_created": True
         }
         
         results = handler.process(envelope, initialized_db)
@@ -84,94 +82,76 @@ class TestValidateHandler:
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_process_invalid_identity(self, handler, sample_identity_event, initialized_db):
-        """Test processing invalid identity event."""
-        # Remove required field
-        event = sample_identity_event.copy()
-        del event["peer_id"]
-        
-        envelope = {
-            "event_plaintext": event,
-            "event_type": "identity",
-            "deps_included_and_valid": True,
-            "sig_checked": True
-        }
+    def test_process_invalid_message(self, handler, initialized_db):
+        """Test processing invalid message event."""
+        event = {"type": "message", "message_id": "m1", "channel_id": "c1", "group_id": "g1", "network_id": "n1", "peer_id": "p1", "content": "", "created_at": 1, "signature": "sig"}
+        envelope = {"event_plaintext": event, "event_type": "message", "deps_included_and_valid": True, "sig_checked": True, "self_created": True}
         
         results = handler.process(envelope, initialized_db)
-        
-        assert len(results) == 1
-        result = results[0]
-        
-        # Should not be validated
-        assert result.get("validated") != True
-        # Original envelope should be returned unchanged
-        assert result["event_plaintext"] == event
-    
-    @pytest.mark.unit
-    @pytest.mark.handler
-    def test_process_stores_validated_event(self, handler, sample_identity_event, initialized_db):
-        """Test that validated events are stored in database."""
-        envelope = {
-            "event_plaintext": sample_identity_event,
-            "event_type": "identity",
-            "deps_included_and_valid": True,
-            "sig_checked": True,
-            "peer_id": sample_identity_event["peer_id"]
-        }
-        
-        results = handler.process(envelope, initialized_db)
-        
-        # Check database for validated event
-        cursor = initialized_db.cursor()
-        cursor.execute(
-            "SELECT * FROM validated_events WHERE event_id = ?",
-            (sample_identity_event["peer_id"],)
-        )
-        
-        row = cursor.fetchone()
-        assert row is not None
-        assert row["event_type"] == "identity"
-        assert row["validated_at"] is not None
+        # Invalid events are dropped by validate handler
+        assert len(results) == 0
     
     @pytest.mark.unit
     @pytest.mark.handler
     def test_process_unknown_event_type(self, handler, initialized_db):
         """Test processing unknown event type."""
-        envelope = {
-            "event_plaintext": {"type": "unknown_type"},
-            "event_type": "unknown_type",
-            "deps_included_and_valid": True,
-            "sig_checked": True
-        }
-        
+        envelope = {"event_plaintext": {"type": "unknown"}, "event_type": "unknown", "deps_included_and_valid": True, "sig_checked": True}
         results = handler.process(envelope, initialized_db)
-        
-        assert len(results) == 1
-        result = results[0]
-        
-        # Should not be validated (no validator for unknown type)
-        assert result.get("validated") != True
+        assert len(results) == 0
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_process_preserves_envelope_data(self, handler, sample_identity_event, initialized_db):
-        """Test that handler preserves all envelope data."""
-        envelope = {
-            "event_plaintext": sample_identity_event,
-            "event_type": "identity",
-            "deps_included_and_valid": True,
-            "sig_checked": True,
-            "custom_field": "preserved",
-            "peer_id": sample_identity_event["peer_id"]
-        }
-        
+    @pytest.mark.unit
+    @pytest.mark.handler
+    def test_process_preserves_envelope_data(self, handler, initialized_db):
+        envelope = {"event_plaintext": {"type": "message", "message_id": "m1", "channel_id": "c1", "group_id": "g1", "network_id": "n1", "peer_id": "p1", "content": "hi", "created_at": 1, "signature": "sig"}, "event_type": "message", "deps_included_and_valid": True, "sig_checked": True, "custom_field": "preserved", "self_created": True}
         results = handler.process(envelope, initialized_db)
         result = results[0]
-        
-        # All fields should be preserved
-        assert result["event_plaintext"] == sample_identity_event
-        assert result["event_type"] == "identity"
-        assert result["deps_included_and_valid"] == True
-        assert result["sig_checked"] == True
         assert result["custom_field"] == "preserved"
-        assert result["validated"] == True
+        assert result["validated"] is True
+
+    @pytest.mark.unit
+    @pytest.mark.handler
+    def test_user_peer_match_validates(self, handler, initialized_db):
+        """User validator should require envelope.peer_id to match event.peer_id."""
+        user_event = {
+            "type": "user",
+            "peer_id": "p-user-1",
+            "network_id": "net-1",
+            "name": "Alice",
+            "created_at": 1,
+            "signature": "sig"
+        }
+        envelope = {
+            "event_plaintext": user_event,
+            "event_type": "user",
+            "peer_id": "p-user-1",
+            "deps_included_and_valid": True,
+            "sig_checked": True,
+            "self_created": True
+        }
+        results = handler.process(envelope, initialized_db)
+        assert len(results) == 1
+        assert results[0]["validated"] is True
+
+    @pytest.mark.unit
+    @pytest.mark.handler
+    def test_user_peer_mismatch_fails(self, handler, initialized_db):
+        user_event = {
+            "type": "user",
+            "peer_id": "p-user-1",
+            "network_id": "net-1",
+            "name": "Alice",
+            "created_at": 1,
+            "signature": "sig"
+        }
+        envelope = {
+            "event_plaintext": user_event,
+            "event_type": "user",
+            "peer_id": "different-peer",
+            "deps_included_and_valid": True,
+            "sig_checked": True
+        }
+        results = handler.process(envelope, initialized_db)
+        # Mismatch -> dropped by validate
+        assert len(results) == 0

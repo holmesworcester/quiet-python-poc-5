@@ -12,6 +12,7 @@ project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.group.queries import get as get_groups
+from core.identity import create_identity
 
 
 class TestGroupQuery:
@@ -21,6 +22,10 @@ class TestGroupQuery:
     def setup_groups(self, initialized_db):
         """Create test groups directly in database."""
         conn = initialized_db
+        # Create an identity for access control
+        db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+        identity = create_identity("Test User", db_path)
+        identity_id = identity.id
 
         # Insert test networks
         network1_id = "test-network-1"
@@ -55,16 +60,17 @@ class TestGroupQuery:
         conn.commit()
 
         return {
+            "identity_id": identity_id,
             "network1_id": network1_id,
             "network2_id": network2_id,
-            "group_ids": ["group-eng", "group-mkt", "group-sales"]
+            "group_ids": ["group-eng", "group-mkt", "group-sales"],
         }
 
     @pytest.mark.unit
     @pytest.mark.event_type
     def test_list_all_groups(self, initialized_db, setup_groups):
         """Test listing all groups."""
-        params = {}
+        params = {"identity_id": setup_groups["identity_id"]}
         groups = get_groups(initialized_db, params)
 
         # Should return all 3 groups
@@ -81,7 +87,7 @@ class TestGroupQuery:
     def test_list_groups_by_network(self, initialized_db, setup_groups):
         """Test listing groups filtered by network."""
         # Get groups from network 1
-        params = {"network_id": setup_groups["network1_id"]}
+        params = {"identity_id": setup_groups["identity_id"], "network_id": setup_groups["network1_id"]}
         groups = get_groups(initialized_db, params)
 
         # Should return 2 groups (Engineering and Marketing)
@@ -92,7 +98,7 @@ class TestGroupQuery:
         assert "Sales" not in group_names
 
         # Get groups from network 2
-        params = {"network_id": setup_groups["network2_id"]}
+        params = {"identity_id": setup_groups["identity_id"], "network_id": setup_groups["network2_id"]}
         groups = get_groups(initialized_db, params)
 
         # Should return 1 group (Sales)
@@ -104,7 +110,7 @@ class TestGroupQuery:
     def test_list_groups_by_owner(self, initialized_db, setup_groups):
         """Test listing groups filtered by owner."""
         # Get groups owned by owner-1
-        params = {"owner_id": "owner-1"}
+        params = {"identity_id": setup_groups["identity_id"], "owner_id": "owner-1"}
         groups = get_groups(initialized_db, params)
 
         # Should return 2 groups
@@ -114,7 +120,7 @@ class TestGroupQuery:
         assert "Marketing" in group_names
 
         # Get groups owned by owner-2
-        params = {"owner_id": "owner-2"}
+        params = {"identity_id": setup_groups["identity_id"], "owner_id": "owner-2"}
         groups = get_groups(initialized_db, params)
 
         # Should return 1 group
@@ -127,8 +133,9 @@ class TestGroupQuery:
         """Test listing groups with multiple filters."""
         # Get groups in network1 owned by owner-1
         params = {
+            "identity_id": setup_groups["identity_id"],
             "network_id": setup_groups["network1_id"],
-            "owner_id": "owner-1"
+            "owner_id": "owner-1",
         }
         groups = get_groups(initialized_db, params)
 
@@ -137,8 +144,9 @@ class TestGroupQuery:
 
         # Get groups in network2 owned by owner-1 (should be none)
         params = {
+            "identity_id": setup_groups["identity_id"],
             "network_id": setup_groups["network2_id"],
-            "owner_id": "owner-1"
+            "owner_id": "owner-1",
         }
         groups = get_groups(initialized_db, params)
 
@@ -149,7 +157,7 @@ class TestGroupQuery:
     @pytest.mark.event_type
     def test_list_groups_includes_member_count(self, initialized_db, setup_groups):
         """Test that group listing includes member count."""
-        params = {"network_id": setup_groups["network1_id"]}
+        params = {"identity_id": setup_groups["identity_id"], "network_id": setup_groups["network1_id"]}
         groups = get_groups(initialized_db, params)
 
         # Find Engineering group
@@ -164,7 +172,7 @@ class TestGroupQuery:
     @pytest.mark.event_type
     def test_list_groups_empty_result(self, initialized_db, setup_groups):
         """Test listing groups with no matches."""
-        params = {"network_id": "non-existent-network"}
+        params = {"identity_id": setup_groups["identity_id"], "network_id": "non-existent-network"}
         groups = get_groups(initialized_db, params)
 
         # Should return empty list
@@ -174,7 +182,7 @@ class TestGroupQuery:
     @pytest.mark.event_type
     def test_list_groups_ordering(self, initialized_db, setup_groups):
         """Test that groups are ordered by creation time."""
-        params = {}
+        params = {"identity_id": setup_groups["identity_id"]}
         groups = get_groups(initialized_db, params)
 
         # Should be ordered by created_at (newest first by default)

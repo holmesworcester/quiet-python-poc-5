@@ -4,9 +4,10 @@ Commands for peer event type.
 import time
 from typing import Dict, Any
 from core.core_types import command
+from protocols.quiet.client import CreatePeerParams, CommandResponse
 
 
-@command
+@command(param_type=CreatePeerParams, result_type=CommandResponse)
 def create_peer(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a peer event for an identity.

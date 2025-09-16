@@ -62,7 +62,7 @@ class TestMessageProjector:
         # Check all fields are included
         data = delta['data']
         event_data = sample_message_event['event_plaintext']
-        assert data['message_id'] == event_data['message_id']
+        assert data['message_id'] == sample_message_event['event_id']
         assert data['channel_id'] == event_data['channel_id']
         assert data['group_id'] == event_data['group_id']
         assert data['network_id'] == event_data['network_id']
@@ -192,7 +192,7 @@ class TestMessageProjector:
                 'signature': 'sig-1'
             },
             'event_type': 'message',
-            'event_id': 'test-event-id',
+            'event_id': 'msg-1',
             'peer_id': 'test-author',
             'sig_checked': True,
             'validated': True
@@ -212,7 +212,7 @@ class TestMessageProjector:
                 'signature': 'sig-2'
             },
             'event_type': 'message',
-            'event_id': 'test-event-id',
+            'event_id': 'msg-2',
             'peer_id': 'test-author',
             'sig_checked': True,
             'validated': True

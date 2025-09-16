@@ -9,10 +9,11 @@ import base64
 from typing import Dict, Any
 from core.crypto import kdf
 from core.core_types import command, response_handler
+from protocols.quiet.client import CreateInviteParams, CreateInviteResult
 from core.db import ReadOnlyConnection
 
 
-@command
+@command(param_type=CreateInviteParams, result_type=CreateInviteResult)
 def create_invite(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a new invite to join a network.

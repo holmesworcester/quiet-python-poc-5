@@ -5,9 +5,10 @@ from core.db import ReadOnlyConnection
 from typing import Dict, Any, List, Optional
 import sqlite3
 from core.queries import query
+from protocols.quiet.client import UserGetParams, UserRecord
 
 
-@query
+@query(param_type=UserGetParams, result_type=list[UserRecord])
 def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     List users visible to an identity in a network.

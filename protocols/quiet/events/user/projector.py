@@ -20,7 +20,8 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
     network_id = event_data['network_id']
     group_id = event_data['group_id']
     name = event_data['name']
-    invite_pubkey = event_data['invite_pubkey']
+    # Invite may be absent for non-invite user creation
+    invite_pubkey = event_data.get('invite_pubkey', '')
     created_at = event_data['created_at']
 
     # Return deltas for creating user record and group membership

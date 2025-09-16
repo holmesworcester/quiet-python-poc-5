@@ -5,9 +5,10 @@ from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
 from core.queries import query
+from protocols.quiet.client import KeyListParams, KeyRecord
 
 
-@query
+@query(param_type=KeyListParams, result_type=list[KeyRecord])
 def list(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """List all keys, optionally filtered by group_id."""
     group_id = params.get('group_id')

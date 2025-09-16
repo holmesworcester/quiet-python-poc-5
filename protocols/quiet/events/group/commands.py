@@ -5,9 +5,10 @@ import time
 import sqlite3
 from typing import Dict, Any, List
 from core.core_types import command, response_handler
+from protocols.quiet.client import CreateGroupParams, CreateGroupResult
 
 
-@command
+@command(param_type=CreateGroupParams, result_type=CreateGroupResult)
 def create_group(params: Dict[str, Any]) -> List[dict[str, Any]]:
     """
     Create a new group.

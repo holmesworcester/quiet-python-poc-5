@@ -5,9 +5,10 @@ from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
 from core.queries import query
+from protocols.quiet.client import MessageGetParams, MessageRecord
 
 
-@query
+@query(param_type=MessageGetParams, result_type=list[MessageRecord])
 def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     List messages visible to an identity.
@@ -36,11 +37,16 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Should verify: identity -> user -> member -> group -> channel
     # For now, just verify the identity exists and allow access if channel_id is provided
     query = """
-        SELECT m.*
+        SELECT 
+            m.*, 
+            COALESCE(u.name, i.name, 'Unknown') AS author_name
         FROM messages m
+        LEFT JOIN users u ON u.peer_id = m.author_id
+        LEFT JOIN peers p ON p.peer_id = m.author_id
+        LEFT JOIN core_identities i ON i.identity_id = p.identity_id
         WHERE EXISTS (
-            SELECT 1 FROM core_identities i
-            WHERE i.identity_id = ?
+            SELECT 1 FROM core_identities i2
+            WHERE i2.identity_id = ?
         )
     """
     query_params = [identity_id]

@@ -24,9 +24,14 @@ def filter_func(envelope: dict[str, Any]) -> bool:
     if envelope.get('stored') is True:
         return False
 
-    # Resolution case: has deps that need resolving
-    if ('deps' in envelope and
-        envelope.get('deps_included_and_valid') is not True):
+    # Resolution case 1: explicit deps declared and not yet valid
+    if ('deps' in envelope and envelope.get('deps_included_and_valid') is not True):
+        return True
+
+    # Resolution case 2: encrypted stages imply key dependency
+    if (envelope.get('transit_ciphertext') is not None and envelope.get('transit_key_id')):
+        return True
+    if (envelope.get('event_ciphertext') is not None and envelope.get('event_key_id')):
         return True
 
     # Trigger unblocking: newly validated events might unblock others
@@ -53,11 +58,38 @@ def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, 
     """
     results = []
 
+    # Declare minimal deps if missing, based on stage
+    if 'deps' not in envelope:
+        deps: List[str] = []
+        if envelope.get('transit_ciphertext') is not None and envelope.get('transit_key_id'):
+            deps.append(f"transit_key:{envelope['transit_key_id']}")
+        elif envelope.get('event_ciphertext') is not None and envelope.get('event_key_id'):
+            deps.append(f"event_key:{envelope['event_key_id']}")
+        elif 'event_plaintext' in envelope:
+            pt = envelope['event_plaintext']
+            etype = envelope.get('event_type', '')
+            if etype == 'message':
+                if pt.get('channel_id'):
+                    deps.append(f"channel:{pt['channel_id']}")
+                if pt.get('peer_id'):
+                    deps.append(f"peer:{pt['peer_id']}")
+            elif etype == 'channel':
+                if pt.get('group_id'):
+                    deps.append(f"group:{pt['group_id']}")
+            elif etype == 'user':
+                if pt.get('invite_pubkey'):
+                    deps.append(f"invite:{pt['invite_pubkey']}")
+                if envelope.get('peer_id'):
+                    deps.append(f"peer:{envelope['peer_id']}")
+        if deps:
+            envelope['deps'] = deps
+            envelope['deps_included_and_valid'] = False
+
     # Handle dependency resolution
     if 'deps' in envelope and envelope.get('deps_included_and_valid') is not True:
         resolved_envelope = resolve_dependencies(envelope, db)
         if resolved_envelope and not resolved_envelope.get('missing_deps'):
-            # Only re-emit if dependencies were actually resolved
+            # Only re-emit if dependencies were actually resolved or there were none
             results.append(resolved_envelope)
         # If missing deps, will be handled by blocking logic below
 

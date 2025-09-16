@@ -4,9 +4,10 @@ Commands for network event type.
 import time
 from typing import Dict, Any, List
 from core.core_types import command
+from protocols.quiet.client import CreateNetworkParams, CommandResponse
 
 
-@command
+@command(param_type=CreateNetworkParams, result_type=CommandResponse)
 def create_network(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a new network.

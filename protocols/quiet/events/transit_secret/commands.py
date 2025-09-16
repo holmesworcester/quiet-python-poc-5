@@ -5,9 +5,10 @@ import time
 from typing import Dict, Any
 from core.crypto import generate_secret
 from core.core_types import command
+from protocols.quiet.client import CreateTransitSecretParams, CommandResponse
 
 
-@command
+@command(param_type=CreateTransitSecretParams, result_type=CommandResponse)
 def create_transit_secret(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a new transit encryption key.

@@ -98,10 +98,9 @@ def get_removal_context(db: sqlite3.Connection) -> Dict[str, Set[str]]:
     cursor = db.execute("SELECT user_id FROM removed_users")
     context['removed_users'] = {row['user_id'] for row in cursor}
     
-    # Get deleted messages
+    # Get deleted messages (include all explicit deletions regardless of reason)
     cursor = db.execute("""
-        SELECT event_id FROM deleted_events 
-        WHERE reason = 'message'
+        SELECT event_id FROM deleted_events
     """)
     context['deleted_messages'] = {row['event_id'] for row in cursor}
     

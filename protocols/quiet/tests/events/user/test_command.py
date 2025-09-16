@@ -48,31 +48,20 @@ class TestUserCommands:
 
         envelopes = join_as_user(params)
 
-        # Should return 3 envelopes: identity, peer, user
-        assert len(envelopes) == 3, "Should create 3 envelopes"
-
-        # Check identity envelope
-        identity_env = envelopes[0]
-        assert identity_env['event_type'] == 'identity'
-        assert identity_env['self_created'] == True
-        assert identity_env['validated'] == True
-        assert 'event_id' in identity_env  # Pre-computed
-        identity_event = identity_env['event_plaintext']
-        assert identity_event['type'] == 'identity'
-        assert identity_event['name'] == 'Alice'
-        assert 'public_key' in identity_event
+        # Should return 2 envelopes: peer, user (identity stored directly)
+        assert len(envelopes) == 2, "Should create 2 envelopes"
 
         # Check peer envelope
-        peer_env = envelopes[1]
+        peer_env = envelopes[0]
         assert peer_env['event_type'] == 'peer'
         assert peer_env['self_created'] == True
         peer_event = peer_env['event_plaintext']
         assert peer_event['type'] == 'peer'
         assert 'public_key' in peer_event
-        assert peer_event['identity_id'] == identity_env['event_id']
+        assert peer_event['identity_id'] != ''
 
         # Check user envelope
-        user_env = envelopes[2]
+        user_env = envelopes[1]
         assert user_env['event_type'] == 'user'
         assert user_env['self_created'] == True
         user_event = user_env['event_plaintext']
@@ -106,7 +95,7 @@ class TestUserCommands:
         envelopes = join_as_user(params)
 
         # Check that user event references peer with placeholder
-        user_env = envelopes[2]
+        user_env = envelopes[1]
         user_event = user_env['event_plaintext']
         assert user_event['peer_id'] == '@generated:peer:0'
 
@@ -168,7 +157,7 @@ class TestUserCommands:
         envelopes = join_as_user(params)
 
         # Check that a name was generated
-        user_env = envelopes[2]
+        user_env = envelopes[1]
         user_event = user_env['event_plaintext']
         assert 'name' in user_event
         assert user_event['name'].startswith('User-')  # Generated names start with User-
@@ -193,13 +182,11 @@ class TestUserCommands:
         }
 
         envelopes = join_as_user(params)
-        identity_env = envelopes[0]
-        identity_id = identity_env['event_id']
 
-        # Check that identity was stored in core_identities
+        # Check that identity was stored in core_identities by name
         cursor = self.db.execute(
-            "SELECT * FROM core_identities WHERE identity_id = ?",
-            (identity_id,)
+            "SELECT * FROM core_identities WHERE name = ? ORDER BY created_at DESC LIMIT 1",
+            ("Charlie",)
         )
         row = cursor.fetchone()
         assert row is not None

@@ -8,10 +8,11 @@ import hashlib
 from typing import Dict, Any
 from core.crypto import generate_keypair, kdf, hash as crypto_hash
 from core.core_types import command, response_handler
+from protocols.quiet.client import JoinAsUserParams, JoinAsUserResult, CommandResponse
 import sqlite3
 
 
-@command
+@command(param_type=JoinAsUserParams, result_type=JoinAsUserResult)
 def join_as_user(params: Dict[str, Any]) -> list[dict[str, Any]]:
     """
     Join a network as a user using an invite link.
@@ -178,7 +179,7 @@ def join_as_user_response(stored_ids: Dict[str, str], params: Dict[str, Any], db
     }
 
 
-@command
+@command(param_type=dict, result_type=CommandResponse)
 def create_user(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a basic user event.

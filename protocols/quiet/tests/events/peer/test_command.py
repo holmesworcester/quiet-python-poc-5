@@ -40,7 +40,6 @@ class TestPeerCommands:
         params = {
             'identity_id': identity_id,
             'username': 'TestUser',
-            'network_id': 'test_network',
             '_db': self.db
         }
 
@@ -49,7 +48,7 @@ class TestPeerCommands:
         # Check envelope structure
         assert envelope['event_type'] == 'peer'
         assert envelope['self_created'] == True
-        assert envelope['network_id'] == 'test_network'
+        # Peer envelope is network-agnostic
         assert envelope['deps'] == []  # No dependencies
 
         # Check event structure
@@ -58,7 +57,7 @@ class TestPeerCommands:
         assert event['peer_id'] == ''  # Will be filled by crypto handler
         assert event['public_key'] == identity.public_key.hex()
         assert event['identity_id'] == identity_id
-        assert event['network_id'] == 'test_network'
+        # Peer event has no network_id
         assert event['username'] == 'TestUser'
         assert 'created_at' in event
         assert event['signature'] == ''  # Not signed yet
@@ -122,13 +121,12 @@ class TestPeerCommands:
         params = {
             'identity_id': identity_id,
             'username': 'TestUser',
-            # No network_id provided
             '_db': self.db
         }
 
         envelope = create_peer(params)
 
-        # Check that network_id is empty
+        # No network_id on peer event or envelope
         event = envelope['event_plaintext']
-        assert event['network_id'] == ''
-        assert envelope['network_id'] == ''
+        assert 'network_id' not in event
+        assert 'network_id' not in envelope

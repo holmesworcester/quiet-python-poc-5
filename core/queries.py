@@ -83,40 +83,59 @@ class QueryRegistry:
 query_registry = QueryRegistry()
 
 
-def query(func: Callable) -> Callable:
+def query(_func: Callable | None = None, *, param_type: Any | None = None, result_type: Any | None = None) -> Callable:
     """
     Decorator for query functions that enforces read-only database access.
 
+    Usage:
+      @query
+      def get(db, params): ...
+
+      @query(param_type=GetParams, result_type=list[RowType])
+      def get(db, params): ...
+
     Query functions receive a ReadOnlyConnection that prevents modifications.
     """
-    # Check signature - standard is (db, params)
-    sig = inspect.signature(func)
-    param_names = list(sig.parameters.keys())
+    def _decorate(func: Callable) -> Callable:
+        # Check signature - standard is (db, params)
+        sig = inspect.signature(func)
+        param_names = list(sig.parameters.keys())
 
-    if not param_names or param_names[0] != 'db':
-        raise TypeError(
-            f"{func.__name__} must have 'db' as first parameter for database connection"
-        )
-
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        # db is first argument - wrap it in read-only if needed
-        if args and isinstance(args[0], sqlite3.Connection):
-            readonly_conn = get_readonly_connection(args[0])
-            args = (readonly_conn,) + args[1:]
-        elif args and not isinstance(args[0], ReadOnlyConnection):
+        if not param_names or param_names[0] != 'db':
             raise TypeError(
-                f"{func.__name__} must receive a database connection as first argument"
+                f"{func.__name__} must have 'db' as first parameter for database connection"
             )
 
-        return func(*args, **kwargs)
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # db is first argument - wrap it in read-only if needed
+            if args and isinstance(args[0], sqlite3.Connection):
+                readonly_conn = get_readonly_connection(args[0])
+                args = (readonly_conn,) + args[1:]
+            elif args and not isinstance(args[0], ReadOnlyConnection):
+                raise TypeError(
+                    f"{func.__name__} must receive a database connection as first argument"
+                )
 
-    # Mark as query function
-    wrapper._is_query = True  # type: ignore[attr-defined]
+            return func(*args, **kwargs)
 
-    # Don't auto-register here - let the API do it with proper operation IDs
+        # Mark as query function
+        wrapper._is_query = True  # type: ignore[attr-defined]
+        # Optional type metadata
+        if param_type is not None:
+            wrapper._param_type = param_type  # type: ignore[attr-defined]
+        if result_type is not None:
+            wrapper._result_type = result_type  # type: ignore[attr-defined]
 
-    return wrapper
+        # Don't auto-register here - let the API do it with proper operation IDs
+
+        return wrapper
+
+    # Support bare @query and @query(...)
+    if _func is None:
+        return _decorate
+    else:
+        return _decorate(_func)
 
 
 # System query functions

@@ -34,7 +34,8 @@ class TestChannelProjector:
             },
             'event_type': 'channel',
             'peer_id': 'test-creator',
-            'network_id': 'test-network'
+            'network_id': 'test-network',
+            'event_id': 'test-channel-id'
         }
     
     @pytest.mark.unit
@@ -53,7 +54,7 @@ class TestChannelProjector:
         # Check all fields are included
         data = delta['data']
         event_data = sample_channel_event['event_plaintext']
-        assert data['channel_id'] == event_data['channel_id']
+        assert data['channel_id'] == sample_channel_event['event_id']
         assert data['group_id'] == event_data['group_id']
         assert data['network_id'] == event_data['network_id']
         assert data['name'] == event_data['name']
@@ -77,6 +78,7 @@ class TestChannelProjector:
                 # No description field
             }
         }
+        envelope['event_id'] = 'test-channel-2'
         
         deltas = project(envelope)
         
@@ -141,6 +143,7 @@ class TestChannelProjector:
                 'created_at': 1000
             }
         }
+        envelope1['event_id'] = 'channel-1'
         
         # Second channel
         envelope2 = {
@@ -154,6 +157,7 @@ class TestChannelProjector:
                 'created_at': 2000
             }
         }
+        envelope2['event_id'] = 'channel-2'
         
         deltas1 = project(envelope1)
         deltas2 = project(envelope2)

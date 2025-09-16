@@ -50,22 +50,29 @@ class API:
             db_path=str(self.db_path)
         )
         
-        # Load OpenAPI spec
+        # Load OpenAPI spec if present (optional)
         openapi_path = self.protocol_dir / "openapi.yaml"
-        if not openapi_path.exists():
-            raise ValueError(f"No OpenAPI spec found at {openapi_path}")
-        
-        with open(openapi_path, 'r') as f:
-            self.openapi = yaml.safe_load(f)
-        
-        # Parse operations from OpenAPI spec
-        self._parse_operations()
+        self.openapi = {}
+        self._specless = False
+        if openapi_path.exists():
+            with open(openapi_path, 'r') as f:
+                self.openapi = yaml.safe_load(f)
+            # Parse operations from OpenAPI spec
+            self._parse_operations()
+        else:
+            # No spec: operate in discovery-only mode
+            self._specless = True
+            self.operations = {}
 
         # Discover and register implementations
         self._discover_implementations()
 
-        # Validate all operations have implementations
-        self._validate_operations()
+        # If running without a spec, synthesize operation map from registries
+        if self._specless:
+            self._synthesize_operations_from_registries()
+        else:
+            # Validate all operations have implementations
+            self._validate_operations()
     
     def _parse_operations(self) -> None:
         """Parse operations from OpenAPI spec."""
@@ -138,6 +145,9 @@ class API:
         # Auto-discover protocol queries
         self.query_registry._auto_discover_queries(str(self.protocol_dir))
 
+        # Prepare type index
+        self.type_index: Dict[str, Dict[str, Any]] = {}
+
         # Discover commands from event directories
         events_dir = self.protocol_dir / "events"
         if events_dir.exists():
@@ -166,6 +176,15 @@ class API:
                                 operation_id = f'{event_type}.{func_name}'
                                 command_registry.register(operation_id, obj)
 
+                                # Capture optional type metadata
+                                param_t = getattr(obj, '_param_type', None)
+                                result_t = getattr(obj, '_result_type', None)
+                                if param_t is not None or result_t is not None:
+                                    self.type_index[operation_id] = {
+                                        'params': param_t,
+                                        'result': result_t
+                                    }
+
                                 # Also register response handlers if they exist
                                 response_func_name = f'{func_name}_response'
                                 if hasattr(module, response_func_name):
@@ -175,6 +194,56 @@ class API:
                     except ImportError as e:
                         # Module couldn't be imported, skip it
                         pass
+
+                # Also inspect queries for type metadata (registration handled by query_registry)
+                queries_file = event_dir / 'queries.py'
+                if queries_file.exists():
+                    try:
+                        q_module_name = f'protocols.{self.protocol_dir.name}.events.{event_type}.queries'
+                        q_module = importlib.import_module(q_module_name)
+                        import inspect as _inspect
+                        for qname in dir(q_module):
+                            qobj = getattr(q_module, qname)
+                            if callable(qobj) and hasattr(qobj, '_is_query'):
+                                op_id = f'{event_type}.{qname}'
+                                param_t = getattr(qobj, '_param_type', None)
+                                result_t = getattr(qobj, '_result_type', None)
+                                if param_t is not None or result_t is not None:
+                                    self.type_index[op_id] = {
+                                        'params': param_t,
+                                        'result': result_t
+                                    }
+                    except ImportError:
+                        pass
+
+    def _synthesize_operations_from_registries(self) -> None:
+        """When no OpenAPI spec is present, derive an operation map from registries.
+
+        - Commands => method post
+        - Queries  => method get
+        """
+        from core.commands import command_registry
+        from core.queries import query_registry
+
+        ops: Dict[str, Dict[str, object]] = {}
+
+        for op in command_registry.list_commands():
+            ops[op] = {
+                'path': f'/{op.split(".", 1)[0]}',
+                'method': 'post',
+                'spec': {}
+            }
+
+        for op in query_registry.list_queries():
+            # avoid overwriting if same id appears in both (shouldn't)
+            if op not in ops:
+                ops[op] = {
+                    'path': f'/{op.split(".", 1)[0]}s',
+                    'method': 'get',
+                    'spec': {}
+                }
+
+        self.operations = ops
     
     def execute_operation(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Any:
         """Execute an operation by its OpenAPI operation ID."""
@@ -184,7 +253,14 @@ class API:
             core_op = operation_id.replace('core.', 'core_')
             return self._execute_core_command(core_op, params)
 
+        # In specless mode or if operation not parsed from spec, fall back to registries
         if operation_id not in self.operations:
+            from core.commands import command_registry
+            from core.queries import query_registry
+            if command_registry.has_command(operation_id):
+                return self._execute_command(operation_id, params)
+            if query_registry.has_query(operation_id):
+                return self._execute_query(operation_id, params)
             raise ValueError(f"Unknown operation: {operation_id}")
 
         operation = self.operations[operation_id]
@@ -310,6 +386,86 @@ class API:
         
         # If not found, raise AttributeError
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+    # ---------------------------------------------------------------------
+    # Debug/Introspection helpers
+    # ---------------------------------------------------------------------
+    def dump_database(self, limit_per_table: int | None = None) -> dict[str, list[dict[str, Any]]]:
+        """
+        Return a raw dump of key tables for inspection.
+
+        Args:
+            limit_per_table: Optional cap on number of rows returned per table.
+
+        Returns:
+            Mapping of table name -> list of row dicts.
+        """
+        import sqlite3 as _sqlite3
+
+        tables_to_dump = [
+            "core_identities",
+            "peers",
+            "users",
+            "groups",
+            "group_members",
+            "channels",
+            "messages",
+            "events",
+            "projected_events",
+            "blocked_events",
+        ]
+
+        result: dict[str, list[dict[str, Any]]] = {}
+
+        conn = get_connection(str(self.db_path))
+        try:
+            conn.row_factory = _sqlite3.Row
+            cur = conn.cursor()
+
+            for table in tables_to_dump:
+                # Check table exists
+                cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+                    (table,)
+                )
+                if cur.fetchone() is None:
+                    result[table] = []
+                    continue
+
+                # Special ordering for certain tables
+                order_by = None
+                if table == "events":
+                    # event store recency
+                    order_by = "received_at DESC"
+                elif table == "messages":
+                    order_by = "created_at DESC"
+                elif table in ("groups", "channels", "users", "peers", "core_identities"):
+                    # best-effort chronological ordering if timestamp column exists
+                    # will fallback below if column missing
+                    order_by = "created_at DESC"
+
+                query = f"SELECT * FROM {table}"
+                if order_by:
+                    # Verify the column exists before adding ORDER BY
+                    try:
+                        cur.execute(f"PRAGMA table_info({table})")
+                        cols = {r[1] for r in cur.fetchall()}
+                        if any(col in cols for col in [c.strip().split()[0] for c in order_by.split(',')]):
+                            query += f" ORDER BY {order_by}"
+                    except Exception:
+                        pass
+
+                if limit_per_table is not None and isinstance(limit_per_table, int) and limit_per_table > 0:
+                    query += f" LIMIT {limit_per_table}"
+
+                cur.execute(query)
+                rows = cur.fetchall()
+                result[table] = [dict(r) for r in rows]
+
+        finally:
+            conn.close()
+
+        return result
 
 
 # Alias for backwards compatibility

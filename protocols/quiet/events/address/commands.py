@@ -4,9 +4,10 @@ Commands for address event type.
 import time
 from typing import Dict, Any, Optional, cast
 from core.core_types import command
+from protocols.quiet.client import AnnounceAddressParams, CommandResponse
 
 
-@command
+@command(param_type=AnnounceAddressParams, result_type=CommandResponse)
 def announce_address(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Announce a network address for a peer.

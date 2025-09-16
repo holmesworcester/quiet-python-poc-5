@@ -5,9 +5,10 @@ from core.db import ReadOnlyConnection
 from typing import Dict, Any, List
 import sqlite3
 from core.queries import query
+from protocols.quiet.client import ChannelGetParams, ChannelRecord
 
 
-@query
+@query(param_type=ChannelGetParams, result_type=list[ChannelRecord])
 def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     List channels visible to an identity.

@@ -152,17 +152,15 @@ class TestEventCryptoHandler(HandlerTestBase):
         assert result['key_ref']['kind'] == 'peer'
         assert result['key_ref']['id'] == 'recipient'
     
-    def test_encrypt_requires_event_id(self):
-        """Test encrypt requires event_id from signature handler."""
+    def test_encrypt_sets_event_id(self):
+        """Event encrypt computes event_id from ciphertext; no pre-existing id required."""
         envelope = self.create_envelope(
-            event_plaintext={"type": "test"}
-            # Missing event_id
+            validated=True,
+            event_plaintext={"type": "test", "content": "hello"}
         )
-        
         result = encrypt_event(envelope)
-        
-        assert 'error' in result
-        assert 'event_id' in result['error']
+        assert 'event_ciphertext' in result
+        assert 'event_id' in result
     
     def test_decrypt_extracts_event_type(self):
         """Test decrypt extracts event_type from plaintext."""

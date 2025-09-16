@@ -86,9 +86,18 @@ class HandlerDef(TypedDict):
     handler: HandlerFunc
 
 
-def command(func: Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]) -> Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]:
+def command(_func: Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]] | None = None, *,
+            param_type: Any | None = None,
+            result_type: Any | None = None) -> Callable[[Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]], Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]] | Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]:
     """
     Decorator to mark command functions.
+
+    Usage:
+      @command
+      def create(...): ...
+
+      @command(param_type=CreateParams, result_type=CreateResult)
+      def create(...): ...
 
     The framework only validates that it takes and returns dicts.
     Protocol-specific validation is done by the protocol.
@@ -96,38 +105,49 @@ def command(func: Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any
     import functools
     import inspect
 
-    sig = inspect.signature(func)
-    params = list(sig.parameters.keys())
+    def _decorate(func: Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]]):
+        sig = inspect.signature(func)
+        params_list = list(sig.parameters.keys())
 
-    if len(params) != 1:
-        raise TypeError(
-            f"{func.__name__} must have exactly one parameter, got {len(params)}"
-        )
+        if len(params_list) != 1:
+            raise TypeError(
+                f"{func.__name__} must have exactly one parameter, got {len(params_list)}"
+            )
 
-    @functools.wraps(func)
-    def wrapper(params: dict[str, Any]) -> dict[str, Any] | list[dict[str, Any]]:
-        if not isinstance(params, dict):
-            raise TypeError(f"Expected dict for params, got {type(params).__name__}")
+        @functools.wraps(func)
+        def wrapper(params: dict[str, Any]) -> dict[str, Any] | list[dict[str, Any]]:
+            if not isinstance(params, dict):
+                raise TypeError(f"Expected dict for params, got {type(params).__name__}")
 
-        result = func(params)
+            result = func(params)
 
-        # Handle both single envelope and list of envelopes
-        if not isinstance(result, (dict, list)):
-            raise TypeError(f"{func.__name__} must return dict or list[dict], got {type(result).__name__}")
+            # Handle both single envelope and list of envelopes
+            if not isinstance(result, (dict, list)):
+                raise TypeError(f"{func.__name__} must return dict or list[dict], got {type(result).__name__}")
 
-        if isinstance(result, list):
-            for i, env in enumerate(result):
-                if not isinstance(env, dict):
-                    raise TypeError(f"{func.__name__} envelope[{i}] must be dict, got {type(env).__name__}")
+            if isinstance(result, list):
+                for i, env in enumerate(result):
+                    if not isinstance(env, dict):
+                        raise TypeError(f"{func.__name__} envelope[{i}] must be dict, got {type(env).__name__}")
 
-        return result
+            return result
 
-    wrapper._is_command = True  # type: ignore
-    wrapper._original_name = func.__name__  # type: ignore[attr-defined]
+        # Marker attributes for discovery
+        wrapper._is_command = True  # type: ignore
+        wrapper._original_name = func.__name__  # type: ignore[attr-defined]
+        # Optional type metadata for discovery
+        if param_type is not None:
+            wrapper._param_type = param_type  # type: ignore[attr-defined]
+        if result_type is not None:
+            wrapper._result_type = result_type  # type: ignore[attr-defined]
 
-    # Auto-register is now done during discovery to get proper event_type context
+        return wrapper
 
-    return wrapper
+    # Support bare @command and @command(...)
+    if _func is None:
+        return _decorate
+    else:
+        return _decorate(_func)
 
 
 def validator(func: Callable[[dict[str, Any]], bool]) -> Callable[[dict[str, Any]], bool]:

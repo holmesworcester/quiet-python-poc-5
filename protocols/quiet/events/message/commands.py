@@ -5,9 +5,10 @@ import time
 import sqlite3
 from typing import Dict, Any, List
 from core.core_types import command, response_handler
+from protocols.quiet.client import CreateMessageParams, CreateMessageResult
 
 
-@command
+@command(param_type=CreateMessageParams, result_type=CreateMessageResult)
 def create_message(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a new message in a channel.

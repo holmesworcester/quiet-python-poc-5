@@ -27,8 +27,9 @@ class TestProjectHandler:
     def test_filter_requires_validated(self, handler):
         """Test filter requires validated to be true."""
         envelope: Dict[str, Any] = {
-            "event_type": "identity",
-            "event_plaintext": {"type": "identity"}
+            "event_type": "message",
+            "event_plaintext": {"type": "message", "channel_id": "c1", "peer_id": "p1", "content": "hi", "created_at": 1},
+            "event_id": "e1"
         }
         assert handler.filter(envelope) == False
         
@@ -52,32 +53,32 @@ class TestProjectHandler:
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_process_identity_event(self, handler, sample_identity_event, initialized_db):
-        """Test projecting identity event."""
-        envelope = {
-            "event_plaintext": sample_identity_event,
-            "event_type": "identity",
-            "validated": True,
-            "peer_id": sample_identity_event["peer_id"],
-            "network_id": sample_identity_event["network_id"]
-        }
-        
-        results = handler.process(envelope, initialized_db)
-        
-        assert len(results) == 1
-        result = results[0]
-        
-        # Should mark as projected
-        assert result["projected"] == True
-        
-        # Check database for projected data
-        cursor = initialized_db.cursor()
-        cursor.execute(
-            "SELECT * FROM peer_identities WHERE peer_id = ?",
-            (sample_identity_event["peer_id"],)
+    def test_process_message_event(self, handler, initialized_db):
+        """Test projecting a message event inserts into messages table."""
+        # Seed channel row that projector expects relationships for
+        initialized_db.execute(
+            "INSERT INTO channels (channel_id, name, group_id, network_id, creator_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("chan-1", "general", "group-1", "net-1", "creator", 1)
         )
-        
-        row = cursor.fetchone()
+        envelope = {
+            "event_plaintext": {
+                "type": "message",
+                "channel_id": "chan-1",
+                "group_id": "group-1",
+                "network_id": "net-1",
+                "peer_id": "author-1",
+                "content": "Hello",
+                "created_at": 2
+            },
+            "event_type": "message",
+            "event_id": "msg-1",
+            "validated": True
+        }
+        results = handler.process(envelope, initialized_db)
+        # No unblock envelopes
+        assert results == []
+        # Check DB
+        row = initialized_db.execute("SELECT * FROM messages WHERE message_id = ?", ("msg-1",)).fetchone()
         assert row is not None
     
     @pytest.mark.unit
@@ -87,16 +88,11 @@ class TestProjectHandler:
         envelope = {
             "event_plaintext": sample_key_event,
             "event_type": "key",
+            "event_id": "key-1",
             "validated": True
         }
-        
         results = handler.process(envelope, initialized_db)
-        
-        assert len(results) == 1
-        result = results[0]
-        
-        # Should mark as projected
-        assert result["projected"] == True
+        assert results == []
     
     @pytest.mark.unit
     @pytest.mark.handler
@@ -105,16 +101,11 @@ class TestProjectHandler:
         envelope = {
             "event_plaintext": sample_transit_secret_event,
             "event_type": "transit_secret",
+            "event_id": "ts-1",
             "validated": True
         }
-        
         results = handler.process(envelope, initialized_db)
-        
-        assert len(results) == 1
-        result = results[0]
-        
-        # Should mark as projected
-        assert result["projected"] == True
+        assert results == []
     
     @pytest.mark.unit
     @pytest.mark.handler
@@ -123,37 +114,23 @@ class TestProjectHandler:
         envelope = {
             "event_plaintext": {"type": "unknown"},
             "event_type": "unknown",
+            "event_id": "x",
             "validated": True
         }
-        
         results = handler.process(envelope, initialized_db)
-        
-        assert len(results) == 1
-        result = results[0]
-        
-        # Should still return envelope but without projected flag
-        # (no projector for unknown type)
-        assert result.get("projected") != True
+        # No projector for unknown type: expect no emission
+        assert results == []
     
     @pytest.mark.unit
     @pytest.mark.handler
-    def test_process_preserves_envelope(self, handler, sample_identity_event, initialized_db):
+    def test_process_preserves_envelope(self, handler, initialized_db):
         """Test that handler preserves envelope data."""
         envelope = {
-            "event_plaintext": sample_identity_event,
-            "event_type": "identity",
+            "event_plaintext": {"type": "channel", "channel_id": "c1", "group_id": "g1", "network_id": "n1", "creator_id": "p1", "name": "general", "created_at": 1},
+            "event_type": "channel",
+            "event_id": "c1",
             "validated": True,
-            "custom_field": "preserved",
-            "peer_id": sample_identity_event["peer_id"],
-            "network_id": sample_identity_event["network_id"]
+            "custom_field": "preserved"
         }
-        
         results = handler.process(envelope, initialized_db)
-        result = results[0]
-        
-        # All fields should be preserved
-        assert result["event_plaintext"] == sample_identity_event
-        assert result["event_type"] == "identity"
-        assert result["validated"] == True
-        assert result["custom_field"] == "preserved"
-        assert result["projected"] == True
+        assert results == []

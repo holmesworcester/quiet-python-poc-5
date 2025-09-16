@@ -5,9 +5,10 @@ import time
 import sqlite3
 from typing import Dict, Any, List
 from core.core_types import command, response_handler
+from protocols.quiet.client import CreateChannelParams, CreateChannelResult
 
 
-@command
+@command(param_type=CreateChannelParams, result_type=CreateChannelResult)
 def create_channel(params: Dict[str, Any]) -> dict[str, Any]:
     """
     Create a new channel within a group.

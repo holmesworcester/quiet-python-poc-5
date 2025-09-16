@@ -114,8 +114,18 @@ def purge_event(event_id: str, db: sqlite3.Connection, reason: str = "validation
         True if purged successfully
     """
     try:
+        now = int(time.time() * 1000)
+        # Ensure row exists; insert if missing
+        db.execute(
+            """
+            INSERT OR IGNORE INTO events (event_id, event_type, stored_at, purged)
+            VALUES (?, ?, ?, ?)
+            """,
+            (event_id, "unknown", now, False),
+        )
         # Update event as purged
-        db.execute("""
+        db.execute(
+            """
             UPDATE events 
             SET purged = ?, 
                 purged_at = ?, 
@@ -124,12 +134,12 @@ def purge_event(event_id: str, db: sqlite3.Connection, reason: str = "validation
             WHERE event_id = ?
         """, (
             True,
-            int(time.time() * 1000),
+            now,
             reason,
-            int(time.time() * 1000) + (7 * 24 * 60 * 60 * 1000),  # 7 day TTL
+            now + (7 * 24 * 60 * 60 * 1000),  # 7 day TTL
             event_id
         ))
-        
+
         # Also delete from any projections if they exist
         db.execute("DELETE FROM projected_events WHERE event_id = ?", (event_id,))
         
