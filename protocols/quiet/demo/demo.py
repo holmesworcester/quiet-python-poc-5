@@ -1153,10 +1153,8 @@ Press [bold]Escape[/bold] to close this help.""",
         
         def on_mount(self):
             """Initialize the panel on mount."""
-            # Initialize the message display  
-            self._update_messages()
-            # Defer full display update to ensure DOM is ready
-            self.call_after_refresh(self.update_display)
+            # Initialize the panel display
+            self.update_display()
         
         
         async def _handle_command(self, command: str) -> None:
@@ -1214,6 +1212,8 @@ Press [bold]Escape[/bold] to close this help.""",
                             self.app.show_snackbar(f"Network created: {network_name}")
                         except Exception:
                             pass
+                        # Force a state refresh before updating display
+                        self.core.refresh_state(force=True)
                         # Update the display to show the network and groups
                         self.update_display()
                         # Also refresh the parent app's displays
@@ -1377,7 +1377,7 @@ Press [bold]Escape[/bold] to close this help.""",
                 # Update identity dropdown text
                 dropdown = self.query_one(f"#identity{self.panel_id}-dropdown", Static)
                 panel = self.core.panels[self.panel_id]
-                
+
                 if panel.identity_name:
                     if panel.current_channel:
                         ch_info = self.core.get_channel_info(self.panel_id, panel.current_channel)
@@ -1391,15 +1391,15 @@ Press [bold]Escape[/bold] to close this help.""",
                     text = f"Identity {self.panel_id}: [bold]{panel.identity_name}[/bold] @ {channel_text}"
                 else:
                     text = f"Identity {self.panel_id}: None"
-                
+
                 dropdown.update(text)
-                
+
                 # Update messages
                 self._update_messages()
-                
-                # Update channel sidebar - defer to avoid DOM conflicts
-                self.call_after_refresh(self._update_channels_sidebar)
-                
+
+                # Update channel sidebar directly (no deferral)
+                self._update_channels_sidebar()
+
             except Exception as e:
                 print(f"Error updating display for panel {self.panel_id}: {e}")
         
@@ -1480,18 +1480,14 @@ Press [bold]Escape[/bold] to close this help.""",
             try:
                 # Get the channels list container
                 channels_list = self.query_one(f"#channels-list{self.panel_id}", Container)
-                
+
                 # Clear existing content
                 for child in list(channels_list.children):
                     child.remove()
-                
-                # Populate channels immediately if DOM is ready, otherwise defer
-                if self.is_mounted:
-                    self.call_after_refresh(lambda: self._populate_channels())
-                else:
-                    # If not mounted yet, just populate directly
-                    self._populate_channels()
-                
+
+                # Populate channels directly
+                self._populate_channels()
+
             except Exception as e:
                 print(f"Error updating channels sidebar for panel {self.panel_id}: {e}")
         
@@ -1502,14 +1498,14 @@ Press [bold]Escape[/bold] to close this help.""",
                 panel = self.core.panels[self.panel_id]
                 if not panel.identity_id:
                     return
-                
+
                 # Query the channels list container, but return if not found
                 try:
                     channels_list = self.query_one(f"#channels-list{self.panel_id}", Container)
                 except Exception:
                     # Widget might not be ready yet
                     return
-                
+
                 # Fetch groups and channels panel-scoped to avoid cross-panel cache issues
                 groups = []
                 if panel.network_id:

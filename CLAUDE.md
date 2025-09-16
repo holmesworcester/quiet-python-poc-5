@@ -39,10 +39,11 @@ python protocols/quiet/demo/demo.py
 python protocols/quiet/demo/demo.py --cli
 
 # Run with specific commands (useful for self-QA)
-python protocols/quiet/demo/demo.py --cli --commands "/create Alice" "/network test-network" # (or see: /help)
+python protocols/quiet/demo/demo_v2.py --cli --commands "/create Alice" "/network test-network" # (or see: /help)
 
-# Note: reset terminal mouse control and scrollwheel mapping commands using printf if you ever run the demo outside CLI mode
-
+# Reset terminal if mouse controls get stuck (after TUI mode)
+./protocols/quiet/demo/reset_terminal.sh
+# Or manually: printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?25h'
 ```
 
 ## High-Level Architecture

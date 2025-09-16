@@ -77,3 +77,11 @@ should pubkey get resolved as a dependency so that sign just has the pk in the e
 shoudl we go back to having an identity event like any other with its own table and we just don't share it and exempt it from usual checks?
 should identity be a handler and create identity is an envelope that gets emitted by a command, and then filled in by the handler?
 
+getting the TUI demo working is proving to be inefficient. but getting the CLI version working is much easier, because LLMs can see what they're doing, and because we're not managing state in the same way. 
+there might be some value in getting a web demo working so that we can test that the API is comfortable and realistic
+one intuition i have is to push on the CLI demo so that we have a perfect repl for testing things.
+we shouldn't use names as identifiers because the API doesn't. we should use id's. commands like /switch or /group or /channel should show me a set of numbered choices (sorted by created_at_ms) and I pick one
+this way you can guess at the choice in CLI with a number
+we should have a $last-created shortcut for the invite command where you can just use the last created invite.
+/state should show the state of all panels (e.g. which channel is active, which user, which network, etc.) and then /views could show a text illustration of all panels. 
+being able to see a log of how envelopes flow through handlers would be interesting
