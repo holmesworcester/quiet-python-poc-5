@@ -172,96 +172,18 @@ class QuietDemoCore:
             if not query_identity and self._cache['identities']:
                 query_identity = self._cache['identities'][0]['identity_id']
 
-            # Get the network_id from the first panel with a network
-            network_id = None
-            for panel in self.panels.values():
-                if panel.network_id:
-                    network_id = panel.network_id
-                    break
-
-            # Fetch groups for the current network; do not clear on temporary failures
-            try:
-                if query_identity and network_id:
-                    fetched_groups = qapi.group_get(self.api, {
-                        'identity_id': query_identity,
-                        'network_id': network_id
-                    })
-                    if isinstance(fetched_groups, list):
-                        self._cache['groups'] = fetched_groups
-                # If context incomplete, keep previous groups
-            except Exception as e:
-                print(f"Warning: Failed to get groups: {e}")
-
-            # Fetch channels for all groups
-            try:
-                fetched_any = False
-                if query_identity and self._cache.get('groups'):
-                    all_channels: list[dict[str, Any]] = []
-                    for group in self._cache['groups']:
-                        try:
-                            channels_result = qapi.channel_get(self.api, {
-                                'identity_id': query_identity,
-                                'group_id': group['group_id']
-                            })
-                            if isinstance(channels_result, list):
-                                all_channels.extend(channels_result)
-                        except Exception as e:
-                            print(f"Warning: Failed to get channels for group {group['group_id']}: {e}")
-                    if all_channels:
-                        self._cache['channels'] = all_channels
-                        fetched_any = True
-                # Fallback: fetch channels by network_id if group-based fetch got nothing
-                if (not fetched_any) and query_identity and network_id:
-                    try:
-                        channels_by_net = qapi.channel_get(self.api, {
-                            'identity_id': query_identity,
-                            'network_id': network_id
-                        })
-                        if isinstance(channels_by_net, list) and channels_by_net:
-                            self._cache['channels'] = channels_by_net
-                    except Exception as e:
-                        print(f"Warning: Failed to get channels by network: {e}")
-            except Exception as e:
-                print(f"Warning: Failed to get channels: {e}")
-
-            # Fetch users for the network
-            try:
-                if query_identity and network_id:
-                    users_result = self.fetch_users(query_identity, network_id)
-                    if isinstance(users_result, list):
-                        self._cache['users'] = users_result
-                # keep previous users if context incomplete
-            except Exception as e:
-                print(f"Warning: Failed to get users: {e}")
+            # NOTE: This method is for global cache refresh. Panel-specific data
+            # should be fetched using panel-specific methods (fetch_groups_direct, etc.)
+            # We'll keep groups/channels/users empty here to avoid cross-panel pollution
+            self._cache['groups'] = []
+            self._cache['channels'] = []
+            self._cache['users'] = []
             
-            # Update people list strictly from users query (minimize frontend state)
-            # Avoid wiping list on transient empty fetches
-            new_people: dict[str, dict[str, Any]] = {}
-            for user in self._cache.get('users', []):
-                user_id = user.get('user_id') or user.get('peer_id')
-                if user_id:
-                    name = user.get('username') or user.get('name')
-                    if not name:
-                        name = f"User-{(user_id or '')[:8]}"
-                    new_people[user_id] = {"name": name, "online": True}
-            if new_people:
-                self.people = new_people
-            
-            # Update groups and channels from database
+            # Clear global collections - panels should use panel-specific fetch methods
+            # This prevents cross-panel data pollution
+            self.people = {}
             self.groups = {}
-            for group in self._cache.get('groups', []):
-                self.groups[group['group_id']] = {
-                    "name": group['name'],
-                    "members": []  # TODO: Implement group membership
-                }
-            
             self.channels = {}
-            for channel in self._cache.get('channels', []):
-                self.channels[channel['channel_id']] = {
-                    "name": channel['name'],
-                    "group": channel.get('group_id'),
-                    "description": channel.get('description', '')
-                }
             
             self._cache_timestamp = time.time()
         except Exception as e:
@@ -309,12 +231,13 @@ class QuietDemoCore:
         try:
             if not identity_id or not network_id:
                 return []
-            return qapi.group_get(self.api, {
+            result = qapi.group_get(self.api, {
                 'identity_id': identity_id,
                 'network_id': network_id
             })
+            return result if result else []
         except Exception as e:
-            print(f"Error fetching groups: {e}")
+            print(f"Error fetching groups for identity {identity_id}, network {network_id}: {e}")
             return []
 
     def fetch_channels_direct(self, identity_id: str, group_id: str | None = None, network_id: str | None = None) -> List[Dict[str, Any]]:
@@ -344,6 +267,24 @@ class QuietDemoCore:
         except Exception as e:
             print(f"Error fetching users: {e}")
             return []
+
+    def get_channel_info(self, panel_id: int, channel_id: str) -> Optional[Dict[str, Any]]:
+        """Get channel info for a specific panel and channel_id."""
+        panel = self.panels.get(panel_id)
+        if not panel or not panel.identity_id:
+            return None
+
+        # First try to fetch all channels for this panel's network
+        if panel.network_id:
+            channels = self.fetch_channels_direct(panel.identity_id, network_id=panel.network_id)
+            for ch in channels:
+                if ch['channel_id'] == channel_id:
+                    return {
+                        "name": ch['name'],
+                        "group": ch.get('group_id'),
+                        "description": ch.get('description', '')
+                    }
+        return None
 
     def get_panel_state(self, panel_id: int) -> PanelState:
         """Get state for a specific panel."""
@@ -590,10 +531,10 @@ class QuietDemoCore:
             self.refresh_state(force=True)
 
             # Find and set the first channel in the network
-            if self.channels:
-                for channel_id in self.channels:
-                    panel.current_channel = channel_id
-                    break
+            if panel.network_id:
+                channels = self.fetch_channels_direct(panel.identity_id, network_id=panel.network_id)
+                if channels:
+                    panel.current_channel = channels[0]['channel_id']
 
             self._add_event('command', f"Panel {panel_id}: Joined network with invite code")
             return CommandResult(True, f"Joined network as: {panel.identity_name}")
@@ -607,36 +548,36 @@ class QuietDemoCore:
         panel = self.panels.get(panel_id)
         if not panel:
             return CommandResult(False, error="Invalid panel ID")
-        
+
         if not panel.identity_id:
             return CommandResult(False, error="No identity selected")
-        
+
+        # Get channels for this panel's network
+        if not panel.network_id:
+            return CommandResult(False, error="No network selected")
+
+        channels = self.fetch_channels_direct(panel.identity_id, network_id=panel.network_id)
+
         # Find channel by name or ID
         channel_id = None
         channel_name = None
-        
-        # First check if it's a channel ID
-        if channel_name_or_id in self.channels:
-            channel_id = channel_name_or_id
-            channel_name = self.channels[channel_id]['name']
-        else:
-            # Search by name
-            for cid, channel in self.channels.items():
-                if channel['name'] == channel_name_or_id:
-                    channel_id = cid
-                    channel_name = channel['name']
-                    break
-        
+
+        for ch in channels:
+            if ch['channel_id'] == channel_name_or_id or ch['name'] == channel_name_or_id:
+                channel_id = ch['channel_id']
+                channel_name = ch['name']
+                break
+
         if not channel_id:
-            return CommandResult(False, error=f"Channel '{channel_name_or_id}' does not exist")
-        
+            return CommandResult(False, error=f"Channel '{channel_name_or_id}' does not exist in this network")
+
         panel.current_channel = channel_id
         panel.messages.append({
-            "type": "system", 
+            "type": "system",
             "text": f"Joined #{channel_name}",
             "timestamp": datetime.now()
         })
-        
+
         self._add_event('command', f"Panel {panel_id}: Joined channel '{channel_name}'")
         return CommandResult(True, f"Joined #{channel_name}")
     
@@ -835,13 +776,20 @@ class QuietDemoCore:
                     output = f"Error: Panel {self.current_cli_panel} has no identity"
             
             elif cmd == "/join" and len(parts) > 1:
-                # Panel-scoped: /join <invite_code> joins in the active empty panel
-                invite_code = parts[1]
+                # Panel-scoped: join in the active empty panel
+                # Supports formats: /join <invite>  OR  /join <name> <invite>
+                args = parts[1:]
+                if len(args) == 1:
+                    invite_code = args[0]
+                    chosen_name = None
+                else:
+                    invite_code = args[-1]
+                    chosen_name = " ".join(args[:-1]).strip() or None
                 panel_id = self.current_cli_panel
                 if self.panels[panel_id].identity_id:
                     output = f"Error: Panel {panel_id} already has an identity. Use /switch to an empty panel."
                 else:
-                    result = self.join_network_with_invite(panel_id, invite_code)
+                    result = self.join_network_with_invite(panel_id, invite_code, chosen_name)
                     if result.success:
                         self.current_cli_panel = panel_id
                     output = result.message if result.success else f"Error: {result.error}"
@@ -880,9 +828,10 @@ class QuietDemoCore:
                         lines.append(f"  ID: {panel.identity_id[:16]}...")
                         lines.append(f"  Network: {panel.network_id}")
                         if panel.current_channel:
-                            # Get channel name from channels dict
-                            if panel.current_channel in self.channels:
-                                channel_name = self.channels[panel.current_channel].get('name', panel.current_channel)
+                            # Get channel name from panel's network
+                            ch_info = self.get_channel_info(panel_id, panel.current_channel)
+                            if ch_info:
+                                channel_name = ch_info['name']
                                 lines.append(f"  Channel: #{channel_name}")
                             else:
                                 lines.append(f"  Channel: #{panel.current_channel}")
@@ -1430,9 +1379,13 @@ Press [bold]Escape[/bold] to close this help.""",
                 panel = self.core.panels[self.panel_id]
                 
                 if panel.identity_name:
-                    if panel.current_channel and panel.current_channel in self.core.channels:
-                        channel_name = self.core.channels[panel.current_channel]['name']
-                        channel_text = f"#{channel_name}"
+                    if panel.current_channel:
+                        ch_info = self.core.get_channel_info(self.panel_id, panel.current_channel)
+                        if ch_info:
+                            channel_name = ch_info['name']
+                            channel_text = f"#{channel_name}"
+                        else:
+                            channel_text = "no channel"
                     else:
                         channel_text = "no channel"
                     text = f"Identity {self.panel_id}: [bold]{panel.identity_name}[/bold] @ {channel_text}"
@@ -1491,8 +1444,9 @@ Press [bold]Escape[/bold] to close this help.""",
                     })
                 
                 # Display welcome message if just joined
-                if panel.current_channel in self.core.channels:
-                    channel_name = self.core.channels[panel.current_channel]['name']
+                ch_info = self.core.get_channel_info(self.panel_id, panel.current_channel)
+                if ch_info:
+                    channel_name = ch_info['name']
                     messages_log.write(f"[dim]--- #{channel_name} ---[/dim]")
                 else:
                     messages_log.write(f"[dim]--- #{panel.current_channel} ---[/dim]")
@@ -1568,27 +1522,18 @@ Press [bold]Escape[/bold] to close this help.""",
                 if groups:
                     for g in groups:
                         group_items.append((g['group_id'], {'name': g['name']}))
-                else:
-                    # Fallback to cached groups if direct fetch empty
-                    for gid, g in self.core.groups.items():
-                        group_items.append((gid, g))
 
                 for group_id, group in sorted(group_items, key=lambda x: x[1]['name']):
                     # Group header
                     group_label = Static(f"[bold]{group['name']}[/bold]", classes="channel-group")
                     widgets_to_mount.append(group_label)
-                    
+
                     # Get channels in this group
                     group_channels_items = []
                     direct_channels = self.core.fetch_channels_direct(panel.identity_id, group_id=group_id)
                     if direct_channels:
                         for ch in direct_channels:
                             group_channels_items.append((ch['channel_id'], {'name': ch['name']}))
-                    else:
-                        # Fallback to cached channels
-                        for ch_id, ch in self.core.channels.items():
-                            if ch.get('group') == group_id:
-                                group_channels_items.append((ch_id, ch))
                     
                     # Add channels
                     for ch_id, channel in sorted(group_channels_items, key=lambda x: x[1]['name']):
@@ -1652,24 +1597,25 @@ Press [bold]Escape[/bold] to close this help.""",
             """Update the groups list."""
             try:
                 groups_list = self.query_one(f"#groups-list{self.panel_id}", Container)
-                
+
                 # Clear existing content
                 for child in list(groups_list.children):
                     child.remove()
-                
+
+                # Get panel-specific groups
+                panel = self.core.panels[self.panel_id]
+                if not panel.identity_id or not panel.network_id:
+                    return
+
+                groups = self.core.fetch_groups_direct(panel.identity_id, panel.network_id)
+
                 widgets = []
-                for group_id, group in sorted(self.core.groups.items()):
+                for group in sorted(groups, key=lambda x: x['name']):
                     group_label = Static(f"[bold]{group['name']}[/bold]", classes="group-item")
                     widgets.append(group_label)
-                    
-                    # Show members if any
-                    if group.get("members"):
-                        for member_id in group["members"]:
-                            if member_id in self.core.people:
-                                member_name = self.core.people[member_id]["name"]
-                                member_label = Static(f"  • {member_name}", classes="member-item")
-                                widgets.append(member_label)
-                
+
+                    # TODO: Show members when group membership is implemented
+
                 if widgets:
                     groups_list.mount(*widgets)
                     
@@ -2078,8 +2024,8 @@ def run_cli_mode(core: QuietDemoCore, commands: List[str] = None):
             print(f"  Identity ID: {panel.identity_id}")
             print(f"  Network ID: {panel.network_id}")
             if panel.current_channel:
-                ch = core.channels.get(panel.current_channel, {})
-                ch_name = ch.get('name', panel.current_channel)
+                ch_info = core.get_channel_info(pid, panel.current_channel)
+                ch_name = ch_info['name'] if ch_info else panel.current_channel
                 print(f"  Channel: #{ch_name} ({panel.current_channel})")
                 # Show last 10 messages via API
                 msgs = core.fetch_messages(panel.identity_id, panel.current_channel)
