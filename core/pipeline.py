@@ -230,9 +230,8 @@ class PipelineRunner:
         queue = no_placeholder_queue
         iterations = 0
 
-        # Track per-envelope processing count to detect loops
-        envelope_process_count: Dict[str, int] = {}
-        max_envelope_processes = 100  # Max times a single envelope can be processed
+        # Max times a single envelope can be processed
+        max_envelope_processes = 100
 
         # Track total envelopes processed across all iterations for diagnostics
         total_envelopes_processed = 0
@@ -246,27 +245,17 @@ class PipelineRunner:
 
             next_queue = []
             for envelope in queue:
-                # Generate a tracking ID for this envelope based on its content
-                # We use a hash of key fields to identify "same" envelope
-                tracking_fields = {
-                    'event_type': envelope.get('event_type', ''),
-                    'event_plaintext': envelope.get('event_plaintext', {}),
-                    'peer_id': envelope.get('peer_id', ''),
-                    'network_id': envelope.get('network_id', ''),
-                }
-                tracking_id = hashlib.sha256(
-                    json.dumps(tracking_fields, sort_keys=True).encode()
-                ).hexdigest()[:16]
+                # Use a simple accumulator field to track processing count
+                process_count = envelope.get('_process_count', 0) + 1
+                envelope['_process_count'] = process_count
 
                 # Check if this envelope has been processed too many times
-                if tracking_id in envelope_process_count:
-                    envelope_process_count[tracking_id] += 1
-                    if envelope_process_count[tracking_id] > max_envelope_processes:
-                        self.log(f"ERROR: Envelope loop detected! Envelope {tracking_id} processed {envelope_process_count[tracking_id]} times")
-                        self.log(f"ERROR: Dropping envelope of type {envelope.get('event_type', 'unknown')}")
-                        continue  # Skip this envelope
-                else:
-                    envelope_process_count[tracking_id] = 1
+                if process_count > max_envelope_processes:
+                    # For debugging, generate a simple ID based on event type and a hash of the plaintext
+                    debug_id = f"{envelope.get('event_type', 'unknown')}_{envelope.get('event_id', 'no_id')}"
+                    self.log(f"ERROR: Envelope loop detected! {debug_id} processed {process_count} times")
+                    self.log(f"ERROR: Dropping envelope of type {envelope.get('event_type', 'unknown')}")
+                    continue  # Skip this envelope
 
                 self.processed_count += 1
 
@@ -334,26 +323,17 @@ class PipelineRunner:
                     # Resolve placeholders in this envelope before processing
                     self._resolve_placeholders(envelope, generated_ids)
 
-                    # Generate tracking ID for loop detection
-                    tracking_fields = {
-                        'event_type': envelope.get('event_type', ''),
-                        'event_plaintext': envelope.get('event_plaintext', {}),
-                        'peer_id': envelope.get('peer_id', ''),
-                        'network_id': envelope.get('network_id', ''),
-                    }
-                    tracking_id = hashlib.sha256(
-                        json.dumps(tracking_fields, sort_keys=True).encode()
-                    ).hexdigest()[:16]
+                    # Use a simple accumulator field to track processing count
+                    process_count = envelope.get('_process_count', 0) + 1
+                    envelope['_process_count'] = process_count
 
                     # Check if this envelope has been processed too many times
-                    if tracking_id in envelope_process_count:
-                        envelope_process_count[tracking_id] += 1
-                        if envelope_process_count[tracking_id] > max_envelope_processes:
-                            self.log(f"ERROR: Envelope loop detected! Envelope {tracking_id} processed {envelope_process_count[tracking_id]} times")
-                            self.log(f"ERROR: Dropping envelope of type {envelope.get('event_type', 'unknown')}")
-                            continue  # Skip this envelope
-                    else:
-                        envelope_process_count[tracking_id] = 1
+                    if process_count > max_envelope_processes:
+                        # For debugging, generate a simple ID based on event type and a hash of the plaintext
+                        debug_id = f"{envelope.get('event_type', 'unknown')}_{envelope.get('event_id', 'no_id')}"
+                        self.log(f"ERROR: Envelope loop detected! {debug_id} processed {process_count} times")
+                        self.log(f"ERROR: Dropping envelope of type {envelope.get('event_type', 'unknown')}")
+                        continue  # Skip this envelope
 
                     self.processed_count += 1
 

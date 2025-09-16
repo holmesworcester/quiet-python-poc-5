@@ -39,7 +39,7 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         SELECT m.*
         FROM messages m
         WHERE EXISTS (
-            SELECT 1 FROM identities i
+            SELECT 1 FROM core_identities i
             WHERE i.identity_id = ?
         )
     """

@@ -1,8 +1,10 @@
 """
-Tests for transit_crypto handler.
+Tests for crypto handler (transit crypto functionality).
 """
 import pytest
-from protocols.quiet.handlers.transit_crypto import filter_func, handler, decrypt_transit, encrypt_transit
+from protocols.quiet.handlers.crypto import (
+    filter_func, handler, decrypt_transit, encrypt_transit
+)
 from protocols.quiet.tests.handlers.test_base import HandlerTestBase
 
 

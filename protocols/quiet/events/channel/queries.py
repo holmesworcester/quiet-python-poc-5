@@ -32,7 +32,7 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     query = """
         SELECT * FROM channels
         WHERE EXISTS (
-            SELECT 1 FROM identities i
+            SELECT 1 FROM core_identities i
             WHERE i.identity_id = ?
         )
     """

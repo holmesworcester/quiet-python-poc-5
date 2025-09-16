@@ -123,10 +123,9 @@ def command(func: Callable[[dict[str, Any]], Any]) -> Callable[[dict[str, Any]],
         return result
 
     wrapper._is_command = True  # type: ignore
+    wrapper._original_name = func.__name__  # Store original name
 
-    # Auto-register the command
-    from core.commands import command_registry
-    command_registry.register(func.__name__, wrapper)
+    # Auto-register is now done during discovery to get proper event_type context
 
     return wrapper
 

@@ -1,281 +1,162 @@
 """
-Tests for message event type command (create).
+Tests for message commands.
 """
 import pytest
-import sys
-import time
-from pathlib import Path
-
-# Add project root to path
-test_dir = Path(__file__).parent
-protocol_dir = test_dir.parent.parent.parent.parent
-project_root = protocol_dir.parent.parent
-sys.path.insert(0, str(project_root))
-
+import tempfile
+import os
 from protocols.quiet.events.message.commands import create_message
-from protocols.quiet.events.identity.commands import create_identity
-from protocols.quiet.events.network.commands import create_network
-from protocols.quiet.events.group.commands import create_group
-from protocols.quiet.events.channel.commands import create_channel
-from protocols.quiet.tests.conftest import process_envelope
+from core.db import get_connection, init_database
 
 
-class TestMessageCommand:
-    """Test message creation command."""
-    
-    @pytest.fixture
-    def setup_channel_and_identity(self, initialized_db):
-        """Create identity, network, group and channel for message tests."""
-        # Create identity
-        identity_envelope = create_identity({"network_id": "test-network"})
-        # Process through pipeline if needed
-        identity_id = identity_envelope["event_plaintext"]["peer_id"]
-        
-        # Create network
-        network_params = {
-            "name": "Test Network",
-            "identity_id": identity_id
-        }
-        network_envelope, identity_envelope = create_network(network_params)
-        # Process through pipeline if needed
-        network_id = network_envelope["event_plaintext"]["network_id"]
-        
-        # Create group
-        group_params = {
-            "name": "Test Group",
-            "identity_id": identity_id,
-            "network_id": network_id
-        }
-        group_envelope = create_group(group_params)
-        # Process through pipeline if needed
-        group_id = group_envelope["event_plaintext"]["group_id"]
-        
-        # Create channel
-        channel_params = {
-            "name": "general",
-            "group_id": group_id,
-            "identity_id": identity_id
-        }
-        channel_envelope = create_channel(channel_params)
-        # Process through pipeline if needed
-        channel_id = channel_envelope["event_plaintext"]["channel_id"]
-        
-        return identity_id, network_id, group_id, channel_id
-    
+class TestMessageCommands:
+    """Test message commands."""
+
+    def setup_method(self):
+        """Set up test database."""
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        os.close(self.db_fd)
+        self.db = get_connection(self.db_path)
+
+        # Get the protocol directory properly
+        import pathlib
+        test_dir = pathlib.Path(__file__).parent
+        protocol_dir = test_dir.parent.parent.parent
+        init_database(self.db, str(protocol_dir))
+
+        # Set up test data
+        self.peer_id = 'test_peer_id'
+        self.channel_id = 'test_channel_id'
+
+    def teardown_method(self):
+        """Clean up test database."""
+        self.db.close()
+        os.unlink(self.db_path)
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_message_basic(self, initialized_db, setup_channel_and_identity):
-        """Test basic message creation."""
-        identity_id, network_id, group_id, channel_id = setup_channel_and_identity
-        
+    def test_create_message_envelope_structure(self):
+        """Test that create_message generates correct envelope structure."""
         params = {
-            "content": "Hello, world!",
-            "channel_id": channel_id,
-            "identity_id": identity_id
+            'content': 'Hello, world!',
+            'channel_id': self.channel_id,
+            'peer_id': self.peer_id
         }
-        
+
         envelope = create_message(params)
-        
-        assert envelope["event_type"] == "message"
-        assert envelope["self_created"] == True
-        assert envelope["peer_id"] == identity_id
-        assert envelope["deps"] == [
-            f"identity:{identity_id}",
-            f"channel:{channel_id}"
-        ]
-        
-        # Check event content
-        event = envelope["event_plaintext"]
-        assert event["type"] == "message"
-        assert event["content"] == "Hello, world!"
-        assert event["channel_id"] == channel_id
-        assert event["peer_id"] == identity_id
-        assert "message_id" in event
-        assert "created_at" in event
 
-        # These fields are empty until handlers process them
-        assert event["message_id"] == ""
-        assert event["group_id"] == ""
-        assert event["network_id"] == ""
-        assert event["signature"] == ""
-    
+        # Check envelope structure
+        assert envelope['event_type'] == 'message'
+        assert envelope['self_created'] == True
+        assert envelope['peer_id'] == self.peer_id
+        assert envelope['network_id'] == ''  # Will be filled by resolve_deps
+
+        # Check dependencies
+        assert f"channel:{self.channel_id}" in envelope['deps']
+        assert f"peer:{self.peer_id}" in envelope['deps']
+
+        # Check event structure
+        event = envelope['event_plaintext']
+        assert event['type'] == 'message'
+        assert event['message_id'] == ''  # Will be filled by encrypt handler
+        assert event['channel_id'] == self.channel_id
+        assert event['group_id'] == ''  # Will be filled by resolve_deps
+        assert event['network_id'] == ''  # Will be filled by resolve_deps
+        assert event['peer_id'] == self.peer_id
+        assert event['content'] == 'Hello, world!'
+        assert 'created_at' in event
+        assert event['signature'] == ''  # Not signed yet
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_message_missing_params(self, initialized_db):
-        """Test that missing params use defaults."""
-        # Missing content - should use empty string default
-        envelope = create_message({"channel_id": "test-channel", "identity_id": "test-id"})
-        assert envelope["event_plaintext"]["content"] == ""
-
-        # Missing channel_id - should use empty string default
-        envelope = create_message({"content": "Hello", "identity_id": "test-id"})
-        assert envelope["event_plaintext"]["channel_id"] == ""
-
-        # Missing identity_id - should use empty string default
-        envelope = create_message({"content": "Hello", "channel_id": "test-channel"})
-        assert envelope["event_plaintext"]["peer_id"] == ""
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_message_empty_content(self, initialized_db, setup_channel_and_identity):
-        """Test creating message with empty content."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-        
+    def test_create_message_dependencies(self):
+        """Test that create_message sets correct dependencies."""
         params = {
-            "content": "",
-            "channel_id": channel_id,
-            "identity_id": identity_id
+            'content': 'Test message',
+            'channel_id': 'channel_123',
+            'peer_id': 'peer_456'
         }
-        
-        # Empty content should be allowed
+
         envelope = create_message(params)
-        assert envelope["event_plaintext"]["content"] == ""
-    
+
+        # Should depend on channel and peer
+        assert len(envelope['deps']) == 2
+        assert "channel:channel_123" in envelope['deps']
+        assert "peer:peer_456" in envelope['deps']
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_message_long_content(self, initialized_db, setup_channel_and_identity):
-        """Test creating message with long content."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-        
-        long_content = "A" * 10000  # 10KB of text
+    def test_create_message_empty_content(self):
+        """Test that create_message handles empty content."""
         params = {
-            "content": long_content,
-            "channel_id": channel_id,
-            "identity_id": identity_id
+            'content': '',  # Empty content
+            'channel_id': self.channel_id,
+            'peer_id': self.peer_id
         }
-        
+
         envelope = create_message(params)
-        assert envelope["event_plaintext"]["content"] == long_content
-    
+
+        # Should use default message
+        event = envelope['event_plaintext']
+        assert event['content'] == 'empty message'
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_multiple_messages(self, initialized_db, setup_channel_and_identity):
-        """Test creating multiple messages in same channel."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-
-        # Create first message
-        params1 = {
-            "content": "First message",
-            "channel_id": channel_id,
-            "identity_id": identity_id
-        }
-        envelope1 = create_message(params1)
-
-        # Create second message
-        params2 = {
-            "content": "Second message",
-            "channel_id": channel_id,
-            "identity_id": identity_id
-        }
-        envelope2 = create_message(params2)
-
-        # Both should have empty message IDs until handlers process them
-        assert envelope1["event_plaintext"]["message_id"] == ""
-        assert envelope2["event_plaintext"]["message_id"] == ""
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_message_timestamps_differ(self, initialized_db, setup_channel_and_identity):
-        """Test that messages created at different times have different timestamps."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-
+    def test_create_message_missing_content(self):
+        """Test that create_message handles missing content."""
         params = {
-            "content": "Hello",
-            "channel_id": channel_id,
-            "identity_id": identity_id
+            # No content field
+            'channel_id': self.channel_id,
+            'peer_id': self.peer_id
         }
 
-        # Two messages with same content at different times should have different timestamps
-        envelope1 = create_message(params)
-        time.sleep(0.01)  # Small delay to ensure different timestamp
-        envelope2 = create_message(params)
-
-        # Both have empty message IDs but different timestamps
-        assert envelope1["event_plaintext"]["message_id"] == ""
-        assert envelope2["event_plaintext"]["message_id"] == ""
-        assert envelope1["event_plaintext"]["created_at"] != envelope2["event_plaintext"]["created_at"]
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_message_special_characters(self, initialized_db, setup_channel_and_identity):
-        """Test creating message with special characters."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-        
-        special_content = "Hello 👋 with emojis 🎉 and unicode ñ é ü"
-        params = {
-            "content": special_content,
-            "channel_id": channel_id,
-            "identity_id": identity_id
-        }
-        
         envelope = create_message(params)
-        assert envelope["event_plaintext"]["content"] == special_content
-    
+
+        # Should use default message
+        event = envelope['event_plaintext']
+        assert event['content'] == 'empty message'
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_message_dependencies(self, initialized_db, setup_channel_and_identity):
-        """Test that message declares correct dependencies."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-        
+    def test_create_message_missing_peer_id(self):
+        """Test that create_message requires peer_id."""
         params = {
-            "content": "Test dependencies",
-            "channel_id": channel_id,
-            "identity_id": identity_id
+            'content': 'Test message',
+            'channel_id': self.channel_id
+            # Missing peer_id
         }
-        
-        envelope = create_message(params)
-        
-        # Should depend on identity (for signing) and channel (for context)
-        assert len(envelope["deps"]) == 2
-        assert f"identity:{identity_id}" in envelope["deps"]
-        assert f"channel:{channel_id}" in envelope["deps"]
-    
+
+        with pytest.raises(ValueError, match="peer_id is required"):
+            create_message(params)
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_message_timestamp(self, initialized_db, setup_channel_and_identity):
-        """Test that message has valid timestamp."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-        
-        before = int(time.time() * 1000)
-        
+    def test_create_message_default_channel(self):
+        """Test that create_message uses default channel if not provided."""
         params = {
-            "content": "Test timestamp",
-            "channel_id": channel_id,
-            "identity_id": identity_id
+            'content': 'Test message',
+            # No channel_id
+            'peer_id': self.peer_id
         }
-        
+
         envelope = create_message(params)
-        created_at = envelope["event_plaintext"]["created_at"]
-        
-        after = int(time.time() * 1000)
-        
-        # Timestamp should be in valid range
-        assert before <= created_at <= after
-        
+
+        # Should use dummy channel
+        event = envelope['event_plaintext']
+        assert event['channel_id'] == 'dummy-channel-id'
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_message_different_content(self, initialized_db, setup_channel_and_identity):
-        """Test creating messages with different content."""
-        identity_id, _, _, channel_id = setup_channel_and_identity
-
-        # Create messages with different content
-        params1 = {
-            "content": "Message A",
-            "channel_id": channel_id,
-            "identity_id": identity_id
+    def test_create_message_timestamp(self):
+        """Test that create_message includes timestamp."""
+        params = {
+            'content': 'Test message',
+            'channel_id': self.channel_id,
+            'peer_id': self.peer_id
         }
 
-        params2 = {
-            "content": "Message B",
-            "channel_id": channel_id,
-            "identity_id": identity_id
-        }
+        envelope = create_message(params)
 
-        envelope1 = create_message(params1)
-        envelope2 = create_message(params2)
-
-        # Both should have empty message IDs but different content
-        assert envelope1["event_plaintext"]["message_id"] == ""
-        assert envelope2["event_plaintext"]["message_id"] == ""
-        assert envelope1["event_plaintext"]["content"] == "Message A"
-        assert envelope2["event_plaintext"]["content"] == "Message B"
+        event = envelope['event_plaintext']
+        assert 'created_at' in event
+        assert isinstance(event['created_at'], int)
+        assert event['created_at'] > 0

@@ -14,7 +14,7 @@ sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.message.queries import get as get_messages
 from protocols.quiet.events.message.commands import create_message
-from protocols.quiet.events.identity.commands import create_identity
+from core.identity import create_identity
 from protocols.quiet.events.network.commands import create_network
 from protocols.quiet.events.group.commands import create_group
 from protocols.quiet.events.channel.commands import create_channel

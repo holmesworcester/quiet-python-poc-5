@@ -19,10 +19,13 @@ def create_invite(params: Dict[str, Any]) -> dict[str, Any]:
 
     Returns an envelope with unsigned invite event and invite link data.
     """
-    # Extract parameters
+    # Extract parameters - frontend provides peer_id
     network_id = params.get('network_id', '')
     group_id = params.get('group_id', '')  # First group to join
-    identity_id = params.get('identity_id', '')
+    peer_id = params.get('peer_id', '')  # Frontend provides peer_id
+
+    if not peer_id:
+        raise ValueError("peer_id is required for create_invite")
 
     # Generate invite secret
     invite_secret = secrets.token_urlsafe(32)
@@ -41,7 +44,7 @@ def create_invite(params: Dict[str, Any]) -> dict[str, Any]:
         'invite_secret': invite_secret,  # Store secret so response handler can recreate link
         'network_id': network_id,
         'group_id': group_id,
-        'inviter_id': identity_id,
+        'inviter_id': peer_id,  # Inviter is identified by their peer
         'created_at': int(time.time() * 1000),
         'signature': ''  # Will be filled by sign handler
     }
@@ -63,7 +66,7 @@ def create_invite(params: Dict[str, Any]) -> dict[str, Any]:
         'event_plaintext': event,
         'event_type': 'invite',
         'self_created': True,
-        'peer_id': identity_id,
+        'peer_id': peer_id,  # Peer that will sign this
         'network_id': network_id,
         'deps': [f"group:{group_id}"],  # Invite depends on group existing
         # Include invite link in envelope for API to return

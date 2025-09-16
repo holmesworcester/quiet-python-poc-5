@@ -884,6 +884,38 @@ Testing infra
 3. Document expected envelope shapes in docstrings
 4. Migrate all code
 
+## Architectural Decisions
+
+### Peer-First Event Creation
+
+We use a **peer-first architecture** where peer events are created before networks. This eliminates special cases in the signature handler and provides consistent event flow:
+
+1. **Peer Creation**: When an identity wants to participate in the protocol, it first creates a peer event containing its public key. The peer_id becomes the protocol-level identifier for this identity.
+
+2. **Network Creation**: Networks require a peer_id as creator, establishing clear ownership and ensuring the creator has a verifiable identity in the protocol.
+
+3. **Frontend Responsibility**: The frontend manages the mapping between core identities and their peer events, passing peer_id directly to all commands.
+
+This approach avoids:
+- Complex database lookups in commands to find the right peer for an identity+network combination
+- Special cases in the signature handler for network creation (where peer doesn't exist yet)
+- Ambiguity about which identity should sign an event
+
+### Core Identity vs Protocol Events
+
+**Identity is part of the core framework**, not stored in the event store. This separation exists because:
+
+1. **Bootstrapping**: The protocol needs identities with private keys to sign the very first events (like peer creation). If identities were events, we'd have a circular dependency.
+
+2. **Security**: Private keys are local-only data that should never be transmitted or stored in the event log.
+
+3. **Framework Feature**: Multiple protocols can use the same identity system without reimplementing key management.
+
+The relationship is:
+- **Core Identity**: Manages private keys, provides signing capabilities (in `/core/identity.py`)
+- **Peer Event**: Protocol-level representation with public key, created by and linked to a core identity
+- **Signature Handler**: Looks up core identity from peer to perform signing operations
+
 # How to Build a Working Demo
 
 1. decide on a project structure for event types (should it be <protocol>/event_types/projectors or projectors/type e.g.?) and for handlers (all in one /<protocol>/handlers/ folder?)

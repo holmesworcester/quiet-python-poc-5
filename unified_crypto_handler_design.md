@@ -185,3 +185,162 @@ The unified handler should:
 2. Extract network_id from the appropriate resolved dependency
 3. Handle all crypto operations in a single pass
 4. Return minimal envelope for transit-encrypted outgoing messages
+
+## Alternative: Identity as Core Framework Feature
+
+### The Problem with Identity Events
+Currently, identity events create bootstrapping tangles:
+- Need event_id but shouldn't be encrypted
+- Special-cased in multiple handlers
+- Circular dependencies (identity needs event_id, event_id needs crypto, crypto needs identity)
+- Complex pipeline flow for what should be simple
+
+### Proposed Core Identity Architecture
+
+Make identity a first-class framework feature at the core level:
+
+#### Core Identity API
+```python
+# In core/identity.py
+class Identity:
+    def __init__(self, identity_id: str, private_key: bytes, public_key: bytes):
+        self.id = identity_id
+        self.private_key = private_key
+        self.public_key = public_key
+
+    def sign(self, data: bytes) -> bytes:
+        """Sign data with identity private key"""
+        return crypto.sign(data, self.private_key)
+
+    def verify_signature(self, data: bytes, signature: bytes) -> bool:
+        """Verify signature with public key"""
+        return crypto.verify(data, signature, self.public_key)
+
+# In core/crypto.py
+def create_identity(name: str = "User") -> Identity:
+    """Create new identity with keypair"""
+    private_key, public_key = generate_keypair()
+    identity_id = hash(public_key)  # Deterministic ID from public key
+    # Store in framework's identity table
+    return Identity(identity_id, private_key, public_key)
+```
+
+#### Framework Identity Storage
+```sql
+-- Core framework table (not protocol-specific)
+CREATE TABLE core_identities (
+    identity_id TEXT PRIMARY KEY,
+    name TEXT,
+    private_key BLOB NOT NULL,
+    public_key BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    -- Future extensions
+    recovery_key BLOB,
+    biometric_hash BLOB,
+    device_id TEXT
+);
+```
+
+### Protocol Changes with Core Identity
+
+#### Peer Event Becomes the Foundation
+```python
+# Peer event is the first "real" protocol event
+{
+    "type": "peer",
+    "peer_id": "<generated>",  # Normal event_id from ciphertext
+    "network_id": "<network>",
+    "identity_public_key": "<identity public key>",  # This is all peers need
+    "created_at": 1234567890,
+    "signature": "<signed by core identity>"
+}
+# Note: identity_id reference may not be needed - framework functions
+# can operate on public keys directly, and crypto handler can include
+# framework-provided identity_unseal() functions
+```
+
+### Benefits of Core Identity
+
+1. **Clean Bootstrapping**
+   - Identity exists before any events
+   - No circular dependencies
+   - No special cases in handlers
+
+2. **Framework Features**
+   - Identity recovery from biometrics
+   - Hardware key support
+   - Multi-device identity sync
+   - Identity export/import
+   - Secure key storage
+
+3. **Simpler Event Model**
+   - All events can be encrypted/signed normally
+   - Peer event grounds identity in protocol
+   - No special identity event handling
+
+4. **Better Security**
+   - Framework controls key storage
+   - Can use platform-specific secure storage
+   - Identity rotation/revocation at framework level
+
+### What Core Would Provide
+
+1. **Identity Management** (Initial MVP)
+   - `create_identity(name)` - Create new identity
+   - `get_identity(identity_id)` - Retrieve identity
+   - `list_identities()` - List all identities
+
+   Future additions:
+   - `delete_identity(identity_id)` - Remove identity
+   - `export_identity(identity_id)` - Export for backup
+   - `import_identity(data)` - Import from backup
+
+2. **Cryptographic Operations** (Initial MVP)
+   - `identity.sign(data)` - Sign with identity
+   - `identity.verify_signature(data, sig)` - Verify signature
+
+   Future additions:
+   - `identity.derive_key(context)` - Derive keys for specific uses
+
+3. **Identity Lifecycle** (Future)
+   - Identity creation/deletion
+   - Key rotation
+   - Recovery mechanisms
+   - Device pairing
+
+### Migration Path
+
+1. **Phase 1**: Add core identity alongside identity events
+2. **Phase 2**: Peer events use core identity reference
+3. **Phase 3**: Deprecate identity events
+4. **Phase 4**: Remove identity event type
+
+### Design Decisions (From Notes)
+
+1. **Identity Metadata**: Name, avatar, etc. belong in the protocol layer, not core
+   - Core only handles cryptographic identity
+   - Protocol defines how identity is presented
+
+2. **Multi-Network Identity**: Each identity can join networks independently
+   - One identity can technically join multiple networks
+   - Commands like `join_as_user`/`create_network_with_user` should enforce single network per identity
+   - But the core framework doesn't restrict this
+
+3. **Identity Discovery**: Through peer events
+   - Peer events contain the identity public key
+   - That's all other peers need to interact
+   - No central identity registry needed
+
+4. **Backwards Compatibility**: Not a concern during prototyping
+   - We can break compatibility while iterating
+   - Clean migration path when stabilizing 
+
+### Recommendation
+
+This architecture makes sense because:
+- **Cleaner separation**: Infrastructure (identity) vs. protocol (peer, messages)
+- **Simpler implementation**: No special cases, no circular deps
+- **Future-proof**: Can add biometrics, hardware keys, etc.
+- **Better UX**: Identity management at app level, not protocol level
+
+The framework should own identity as core infrastructure, just like it owns the database and crypto primitives. Protocols then use identities through peer events to establish presence and relationships.

@@ -73,7 +73,7 @@ class MessageEventData(TypedDict):
     channel_id: str
     group_id: str
     network_id: str
-    peer_id: str
+    peer_id: str  # The event_id of the `peer` event of the peer that created this message
     content: str
     created_at: int
     signature: str

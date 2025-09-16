@@ -13,7 +13,7 @@ project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.member.commands import create_member
-from protocols.quiet.events.identity.commands import create_identity
+from core.identity import create_identity
 from protocols.quiet.events.group.commands import create_group
 from core.crypto import verify, generate_keypair
 

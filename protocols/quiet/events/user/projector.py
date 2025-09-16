@@ -43,7 +43,7 @@ def project(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
             'data': {
                 'group_id': group_id,
                 'user_id': user_id,
-                'added_by': event.get('added_by', user_id),  # Who added them (self if not specified)
+                'added_by': event_data.get('added_by', user_id),  # Who added them (self if not specified)
                 'added_at': created_at
             }
         }

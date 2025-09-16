@@ -79,16 +79,15 @@ def test_join_as_user_with_db_check():
     db = sqlite3.connect(db_path)
     db.row_factory = sqlite3.Row
     
-    # Check identities table
-    cursor = db.execute("SELECT * FROM identities")
+    # Check core_identities table
+    cursor = db.execute("SELECT * FROM core_identities")
     identities = cursor.fetchall()
     print(f"\nIdentities in database: {len(identities)}")
-    
+
     if identities:
         identity = identities[0]
         print(f"  - Identity ID: {identity['identity_id']}")
         print(f"  - Name: {identity['name']}")
-        print(f"  - Network: {identity['network_id']}")
         print(f"  - Has private key: {bool(identity['private_key'])}")
     
     # Check peers table
@@ -112,49 +111,66 @@ def test_placeholder_resolution():
     """Test that placeholders are correctly resolved."""
     import protocols.quiet.events.user.commands
     from protocols.quiet.events.user.commands import join_as_user
-    
-    # Create invite
-    invite_data = {
-        'invite_secret': 'test_secret_123',
-        'network_id': 'test_network',
-        'group_id': 'test_group'
-    }
-    invite_json = json.dumps(invite_data)
-    invite_b64 = base64.b64encode(invite_json.encode()).decode()
-    invite_link = f'quiet://invite/{invite_b64}'
-    
-    # Get the envelopes from the command
-    envelopes = join_as_user({
-        'invite_link': invite_link,
-        'name': 'Alice'
-    })
-    
-    print(f"\nCommand generated {len(envelopes)} envelopes")
-    
-    # Check envelope structure
-    identity_env = envelopes[0]
-    peer_env = envelopes[1]
-    user_env = envelopes[2]
-    
-    # Identity should have pre-calculated ID
-    assert 'event_id' in identity_env, "Identity should have event_id"
-    print(f"✓ Identity has event_id: {identity_env['event_id']}")
-    
-    # Peer should reference identity
-    peer_event = peer_env['event_plaintext']
-    assert peer_event['identity_id'] == identity_env['event_id'], "Peer should reference identity"
-    print(f"✓ Peer references identity: {peer_event['identity_id']}")
-    
-    # User should have placeholder for peer
-    user_event = user_env['event_plaintext']
-    assert user_event['peer_id'] == '@generated:peer:0', "User should have placeholder"
-    print(f"✓ User has placeholder: {user_event['peer_id']}")
-    
-    # User deps should also have placeholder
-    assert '@generated:peer:0' in user_env['deps'], "User deps should have placeholder"
-    print(f"✓ User deps have placeholder: {'@generated:peer:0' in user_env['deps']}")
-    
-    return True
+    from core.db import get_connection, init_database
+    import tempfile
+    import os
+
+    # Create a temporary database
+    db_fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(db_fd)
+
+    try:
+        # Initialize database
+        db = get_connection(db_path)
+        init_database(db, 'protocols/quiet')
+
+        # Create invite
+        invite_data = {
+            'invite_secret': 'test_secret_123',
+            'network_id': 'test_network',
+            'group_id': 'test_group'
+        }
+        invite_json = json.dumps(invite_data)
+        invite_b64 = base64.b64encode(invite_json.encode()).decode()
+        invite_link = f'quiet://invite/{invite_b64}'
+
+        # Get the envelopes from the command with database
+        envelopes = join_as_user({
+            'invite_link': invite_link,
+            'name': 'Alice',
+            '_db': db
+        })
+
+        print(f"\nCommand generated {len(envelopes)} envelopes")
+
+        # Check envelope structure
+        identity_env = envelopes[0]
+        peer_env = envelopes[1]
+        user_env = envelopes[2]
+
+        # Identity should have pre-calculated ID
+        assert 'event_id' in identity_env, "Identity should have event_id"
+        print(f"✓ Identity has event_id: {identity_env['event_id']}")
+
+        # Peer should reference identity
+        peer_event = peer_env['event_plaintext']
+        assert peer_event['identity_id'] == identity_env['event_id'], "Peer should reference identity"
+        print(f"✓ Peer references identity: {peer_event['identity_id']}")
+
+        # User should have placeholder for peer
+        user_event = user_env['event_plaintext']
+        assert user_event['peer_id'] == '@generated:peer:0', "User should have placeholder"
+        print(f"✓ User has placeholder: {user_event['peer_id']}")
+
+        # User deps should also have placeholder
+        assert '@generated:peer:0' in user_env['deps'], "User deps should have placeholder"
+        print(f"✓ User deps have placeholder: {'@generated:peer:0' in user_env['deps']}")
+
+        return True
+    finally:
+        # Clean up
+        db.close()
+        os.unlink(db_path)
 
 
 def test_pipeline_placeholder_resolution():

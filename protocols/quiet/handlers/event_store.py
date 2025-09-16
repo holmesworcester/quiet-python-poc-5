@@ -17,9 +17,13 @@ from core.handlers import Handler
 def filter_func(envelope: dict[str, Any]) -> bool:
     """
     Process envelopes that need to be stored.
+    Skip identity events (they're stored in identities table).
     """
     # Only process if it needs storing AND hasn't been stored yet
-    return envelope.get('write_to_store') is True and envelope.get('stored') is not True
+    # Skip identity events (handled by project handler)
+    return (envelope.get('write_to_store') is True and
+            envelope.get('stored') is not True and
+            not envelope.get('store_as_identity'))
 
 
 def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, Any]:

@@ -14,18 +14,21 @@ def create_group(params: Dict[str, Any]) -> List[dict[str, Any]]:
 
     Returns a list of envelopes with group event and member event for the creator.
     """
-    # Extract parameters with sensible defaults
+    # Extract parameters - frontend provides peer_id
     name = params.get('name', '') or 'unnamed-group'
     network_id = params.get('network_id', '') or 'dummy-network-id'
-    identity_id = params.get('identity_id', '') or 'dummy-identity-id'
-    
+    peer_id = params.get('peer_id', '')  # Frontend provides peer_id
+
+    if not peer_id:
+        raise ValueError("peer_id is required for create_group")
+
     # Create group event (unsigned)
     event: Dict[str, Any] = {
         'type': 'group',
         'group_id': '',  # Will be filled by encrypt handler
         'name': name,
         'network_id': network_id,
-        'creator_id': identity_id,
+        'creator_id': peer_id,  # Creator is identified by their peer event
         'created_at': int(time.time() * 1000),
         'signature': ''  # Will be filled by sign handler
     }
@@ -34,30 +37,22 @@ def create_group(params: Dict[str, Any]) -> List[dict[str, Any]]:
     member_event: Dict[str, Any] = {
         'type': 'member',
         'group_id': '',  # Will be filled when group is created
-        'user_id': identity_id,
-        'added_by': identity_id,
+        'user_id': peer_id,  # User is identified by their peer event
+        'added_by': peer_id,  # Added by themselves
         'network_id': network_id,
         'created_at': int(time.time() * 1000),
         'signature': ''  # Will be filled by sign handler
     }
 
-    # Return group and member event envelopes
+    # Return only group event envelope (member events are created separately)
     return [
         {
             'event_plaintext': event,
             'event_type': 'group',
             'self_created': True,
-            'peer_id': identity_id,
+            'peer_id': peer_id,  # Identifies who's creating this
             'network_id': network_id,
             'deps': []  # Group creation doesn't depend on other events
-        },
-        {
-            'event_plaintext': member_event,
-            'event_type': 'member',
-            'self_created': True,
-            'peer_id': identity_id,
-            'network_id': network_id,
-            'deps': ['group:']  # Member depends on group existing
         }
     ]
 

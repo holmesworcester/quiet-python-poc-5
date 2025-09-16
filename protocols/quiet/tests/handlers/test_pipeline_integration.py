@@ -5,9 +5,8 @@ import pytest
 import time
 from protocols.quiet.handlers.receive_from_network import ReceiveFromNetworkHandler
 from protocols.quiet.handlers.resolve_deps import handler as resolve_deps_handler, filter_func as resolve_deps_filter
-from protocols.quiet.handlers.transit_crypto import handler as transit_crypto_handler
+from protocols.quiet.handlers.crypto import handler as crypto_handler
 from protocols.quiet.handlers.remove import handler as remove_handler
-from protocols.quiet.handlers.event_crypto import handler as event_crypto_handler
 from protocols.quiet.handlers.event_store import handler as event_store_handler
 from protocols.quiet.handlers.signature import handler as signature_handler
 from protocols.quiet.handlers.validate import ValidateHandler

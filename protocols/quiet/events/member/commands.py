@@ -47,7 +47,7 @@ def create_member(params: Dict[str, Any]) -> dict[str, Any]:
         'event_plaintext': event,
         'event_type': 'member',
         'self_created': True,
-        'peer_id': identity_id,
+        'identity_id': identity_id,  # Core identity that will sign this
         'network_id': network_id,
         'deps': [f"group:{group_id}", f"user:{user_id}"]  # Depends on group and user existing
     }

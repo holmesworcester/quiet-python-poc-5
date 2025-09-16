@@ -33,7 +33,7 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     query = """
         SELECT * FROM groups
         WHERE EXISTS (
-            SELECT 1 FROM identities i
+            SELECT 1 FROM core_identities i
             WHERE i.identity_id = ?
         )
     """
@@ -50,7 +50,7 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         JOIN group_members gm ON g.group_id = gm.group_id
         WHERE gm.user_id = ?
         AND EXISTS (
-            SELECT 1 FROM identities i
+            SELECT 1 FROM core_identities i
             WHERE i.identity_id = ?
         )
         """

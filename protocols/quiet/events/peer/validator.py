@@ -18,8 +18,8 @@ def validate(envelope: Dict[str, Any]) -> bool:
     if event_data.get('type') != 'peer':
         return False
     
-    # Check required fields
-    required_fields = ['type', 'public_key', 'identity_id', 'network_id', 'created_at', 'signature']
+    # Check required fields (peer_id is filled by crypto handler, network_id can be empty)
+    required_fields = ['type', 'public_key', 'identity_id', 'created_at', 'signature']
     for field in required_fields:
         if field not in event_data:
             return False
@@ -32,9 +32,7 @@ def validate(envelope: Dict[str, Any]) -> bool:
     if not event_data['identity_id']:
         return False
     
-    # Check that network_id is not empty
-    if not event_data['network_id']:
-        return False
+    # network_id can be empty when peer is created before network
     
     # Check that created_at is a positive integer
     if not isinstance(event_data['created_at'], int) or event_data['created_at'] <= 0:

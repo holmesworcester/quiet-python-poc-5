@@ -1,159 +1,182 @@
 """
-Tests for channel event type command (create).
+Tests for channel commands.
 """
 import pytest
-import sys
-import time
-from pathlib import Path
-
-# Add project root to path
-test_dir = Path(__file__).parent
-protocol_dir = test_dir.parent.parent.parent.parent
-project_root = protocol_dir.parent.parent
-sys.path.insert(0, str(project_root))
-
+import tempfile
+import os
 from protocols.quiet.events.channel.commands import create_channel
-from protocols.quiet.events.identity.commands import create_identity
-from protocols.quiet.events.network.commands import create_network
-from protocols.quiet.events.group.commands import create_group
-from protocols.quiet.tests.conftest import process_envelope
+from core.db import get_connection, init_database
 
 
-class TestChannelCommand:
-    """Test channel creation command."""
-    
-    @pytest.fixture
-    def setup_network_and_identity(self, initialized_db):
-        """Create identity, network, and group for channel tests."""
-        # Create identity
-        identity_envelope = create_identity({"network_id": "test-network"})
-        identity_id = identity_envelope["event_id"]
+class TestChannelCommands:
+    """Test channel commands."""
 
-        # For testing, use identity_id as peer_id (in real system, would create peer event)
-        # The peer_id would normally come from a peer event's event_id
-        peer_id = identity_id  # Simplified for testing
+    def setup_method(self):
+        """Set up test database."""
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        os.close(self.db_fd)
+        self.db = get_connection(self.db_path)
 
-        # Use mock IDs since commands don't generate them
-        network_id = "test-network-id"
-        group_id = "test-group-id"
+        # Get the protocol directory properly
+        import pathlib
+        test_dir = pathlib.Path(__file__).parent
+        protocol_dir = test_dir.parent.parent.parent
+        init_database(self.db, str(protocol_dir))
 
-        return peer_id, network_id, group_id
-    
+        # Set up test data
+        self.peer_id = 'test_peer_id'
+        self.group_id = 'test_group_id'
+        self.network_id = 'test_network_id'
+
+    def teardown_method(self):
+        """Clean up test database."""
+        self.db.close()
+        os.unlink(self.db_path)
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_channel_basic(self, initialized_db, setup_network_and_identity):
-        """Test basic channel creation."""
-        identity_id, network_id, group_id = setup_network_and_identity
-        
+    def test_create_channel_envelope_structure(self):
+        """Test that create_channel generates correct envelope structure."""
         params = {
-            "name": "general",
-            "group_id": group_id,
-            "identity_id": identity_id,
-            "network_id": network_id,
+            'name': 'general',
+            'group_id': self.group_id,
+            'peer_id': self.peer_id,
+            'network_id': self.network_id
         }
 
         envelope = create_channel(params)
-        
-        # Should emit exactly one envelope
-        # Single envelope returned
 
-        assert envelope["event_type"] == "channel"
-        assert envelope["self_created"] == True
-        assert envelope["peer_id"] == identity_id
-        assert envelope["network_id"] == network_id
-        assert envelope["deps"] == [f"group:{group_id}"]
-        
-        # Check event content
-        event = envelope["event_plaintext"]
-        assert event["type"] == "channel"
-        assert event["name"] == "general"
-        assert event["group_id"] == group_id
-        assert event["network_id"] == network_id
-        assert event["creator_id"] == identity_id
-        assert event["channel_id"] == ""  # Empty until handlers process
-        assert "created_at" in event
-    
+        # Check envelope structure
+        assert envelope['event_type'] == 'channel'
+        assert envelope['self_created'] == True
+        assert envelope['peer_id'] == self.peer_id
+        assert envelope['network_id'] == self.network_id
+
+        # Check dependencies
+        assert envelope['deps'] == [f"group:{self.group_id}"]
+
+        # Check event structure
+        event = envelope['event_plaintext']
+        assert event['type'] == 'channel'
+        assert event['channel_id'] == ''  # Will be filled by encrypt handler
+        assert event['group_id'] == self.group_id
+        assert event['name'] == 'general'
+        assert event['network_id'] == self.network_id
+        assert event['creator_id'] == self.peer_id
+        assert 'created_at' in event
+        assert event['signature'] == ''  # Not signed yet
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_channel_missing_params(self):
-        """Test that commands provide sensible defaults for missing params."""
-        # Commands provide dummy data when params are missing
-        envelope = create_channel({"group_id": "test-group", "identity_id": "test-id"})
-        assert envelope["event_plaintext"]["name"] == "unnamed-channel"  # Default name
-
-        envelope = create_channel({"name": "general", "identity_id": "test-id"})
-        assert envelope["event_plaintext"]["group_id"] == "dummy-group-id"  # Default group
-
-        envelope = create_channel({"name": "general", "group_id": "test-group"})
-        assert envelope["event_plaintext"]["creator_id"] == "dummy-identity-id"  # Default creator
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_multiple_channels(self, initialized_db, setup_network_and_identity):
-        """Test creating multiple channels in same group."""
-        identity_id, network_id, group_id = setup_network_and_identity
-        
-        # Create first channel
-        params1 = {
-            "name": "general",
-            "group_id": group_id,
-            "identity_id": identity_id,
-            "network_id": network_id
-        }
-        envelope1 = create_channel(params1)
-
-        # Create second channel
-        params2 = {
-            "name": "random",
-            "group_id": group_id,
-            "identity_id": identity_id,
-            "network_id": network_id
-        }
-        envelope2 = create_channel(params2)
-
-        # Both have empty IDs until handlers process
-        assert envelope1["event_plaintext"]["channel_id"] == ""
-        assert envelope2["event_plaintext"]["channel_id"] == ""
-        # But different names
-        assert envelope1["event_plaintext"]["name"] != envelope2["event_plaintext"]["name"]
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_channel_deterministic_id(self, initialized_db, setup_network_and_identity):
-        """Test that channels have different timestamps."""
-        identity_id, network_id, group_id = setup_network_and_identity
-
-        # Create channel with specific timestamp
+    def test_create_channel_dependency(self):
+        """Test that create_channel depends on group."""
         params = {
-            "name": "general",
-            "group_id": group_id,
-            "identity_id": identity_id,
-            "network_id": network_id
-        }
-
-        # Two channels created at different times should have different timestamps
-        envelope1 = create_channel(params)
-        time.sleep(0.01)  # Small delay to ensure different timestamp
-        envelope2 = create_channel(params)
-
-        # IDs are empty until handlers, but timestamps differ
-        assert envelope1["event_plaintext"]["created_at"] != envelope2["event_plaintext"]["created_at"]
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_create_channel_empty_description(self, initialized_db, setup_network_and_identity):
-        """Test creating channel without description."""
-        identity_id, network_id, group_id = setup_network_and_identity
-
-        params = {
-            "name": "general",
-            "group_id": group_id,
-            "identity_id": identity_id,
-            "network_id": network_id
+            'name': 'test-channel',
+            'group_id': 'group_123',
+            'peer_id': self.peer_id,
+            'network_id': self.network_id
         }
 
         envelope = create_channel(params)
-        event = envelope["event_plaintext"]
-        
-        # No description field for channels
-        assert "description" not in event
+
+        # Should depend only on group
+        assert len(envelope['deps']) == 1
+        assert envelope['deps'][0] == "group:group_123"
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_channel_missing_peer_id(self):
+        """Test that create_channel requires peer_id."""
+        params = {
+            'name': 'general',
+            'group_id': self.group_id,
+            'network_id': self.network_id
+            # Missing peer_id
+        }
+
+        with pytest.raises(ValueError, match="peer_id is required"):
+            create_channel(params)
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_channel_default_name(self):
+        """Test that create_channel uses default name if not provided."""
+        params = {
+            # No name
+            'group_id': self.group_id,
+            'peer_id': self.peer_id,
+            'network_id': self.network_id
+        }
+
+        envelope = create_channel(params)
+
+        event = envelope['event_plaintext']
+        assert event['name'] == 'unnamed-channel'
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_channel_empty_name(self):
+        """Test that create_channel handles empty name."""
+        params = {
+            'name': '',  # Empty name
+            'group_id': self.group_id,
+            'peer_id': self.peer_id,
+            'network_id': self.network_id
+        }
+
+        envelope = create_channel(params)
+
+        event = envelope['event_plaintext']
+        assert event['name'] == 'unnamed-channel'
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_channel_default_group(self):
+        """Test that create_channel uses default group if not provided."""
+        params = {
+            'name': 'general',
+            # No group_id
+            'peer_id': self.peer_id,
+            'network_id': self.network_id
+        }
+
+        envelope = create_channel(params)
+
+        event = envelope['event_plaintext']
+        assert event['group_id'] == 'dummy-group-id'
+        assert envelope['deps'] == ['group:dummy-group-id']
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_channel_default_network(self):
+        """Test that create_channel uses default network if not provided."""
+        params = {
+            'name': 'general',
+            'group_id': self.group_id,
+            'peer_id': self.peer_id
+            # No network_id
+        }
+
+        envelope = create_channel(params)
+
+        event = envelope['event_plaintext']
+        assert event['network_id'] == 'dummy-network-id'
+        assert envelope['network_id'] == 'dummy-network-id'
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_channel_timestamp(self):
+        """Test that create_channel includes timestamp."""
+        params = {
+            'name': 'general',
+            'group_id': self.group_id,
+            'peer_id': self.peer_id,
+            'network_id': self.network_id
+        }
+
+        envelope = create_channel(params)
+
+        event = envelope['event_plaintext']
+        assert 'created_at' in event
+        assert isinstance(event['created_at'], int)
+        assert event['created_at'] > 0

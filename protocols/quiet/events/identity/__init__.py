@@ -1,1 +1,0 @@
-"""Identity event type."""

@@ -1,8 +1,8 @@
 """
-Tests for event_crypto handler.
+Tests for crypto handler (event crypto functionality).
 """
 import pytest
-from protocols.quiet.handlers.event_crypto import (
+from protocols.quiet.handlers.crypto import (
     filter_func, handler, unseal_key_event, decrypt_event, encrypt_event
 )
 from protocols.quiet.tests.handlers.test_base import HandlerTestBase

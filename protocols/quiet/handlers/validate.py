@@ -29,11 +29,17 @@ class ValidateHandler(Handler):
     
     def filter(self, envelope: dict[str, Any]) -> bool:
         """Process envelopes ready for validation."""
+        # Skip if already has error
+        if envelope.get('error'):
+            return False
+
+        # For self-created events, they get validated after signing but before encryption (no event_id yet)
+        # For received events, they get validated after decryption (event_id exists)
         return (
             validate_envelope_fields(envelope, {'event_plaintext', 'event_type'}) and
             envelope.get('sig_checked') is True and
             not envelope.get('validated', False) and
-            'event_id' in envelope  # Required for purging if validation fails
+            (envelope.get('self_created') or 'event_id' in envelope)  # Self-created don't have event_id yet
         )
     
     def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:

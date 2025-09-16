@@ -13,7 +13,7 @@ sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.channel.queries import get as get_channels
 from protocols.quiet.events.channel.commands import create_channel
-from protocols.quiet.events.identity.commands import create_identity
+from core.identity import create_identity
 from protocols.quiet.events.network.commands import create_network
 from protocols.quiet.events.group.commands import create_group
 # from core.pipeline import PipelineRunner  # Use if needed

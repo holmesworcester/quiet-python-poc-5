@@ -13,7 +13,7 @@ project_root = protocol_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 from protocols.quiet.events.transit_secret.commands import create_transit_secret
-from protocols.quiet.events.identity.commands import create_identity
+from core.identity import create_identity
 from core.crypto import verify
 
 

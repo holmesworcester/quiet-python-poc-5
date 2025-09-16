@@ -85,9 +85,9 @@ class JobHandler(Handler):
             print(f"[JobHandler] Job {job_name} failed: {e}")
             # Track failure
             cursor.execute("""
-                INSERT OR REPLACE INTO job_runs (job_name, last_run_ms, last_failure_ms, failure_count)
-                VALUES (?, ?, ?, COALESCE((SELECT failure_count FROM job_runs WHERE job_name = ?), 0) + 1)
-            """, (job_name, time_now_ms, time_now_ms, job_name))
+                INSERT OR REPLACE INTO job_runs (job_name, last_run_ms, last_failure_ms, failure_count, last_state)
+                VALUES (?, ?, ?, COALESCE((SELECT failure_count FROM job_runs WHERE job_name = ?), 0) + 1, ?)
+            """, (job_name, time_now_ms, time_now_ms, job_name, json.dumps(state)))
             db.commit()
             return []
 
@@ -101,14 +101,15 @@ class JobHandler(Handler):
             # Track success
             cursor.execute("""
                 INSERT OR REPLACE INTO job_runs (
-                    job_name, last_run_ms, last_success_ms, success_count, failure_count
+                    job_name, last_run_ms, last_success_ms, success_count, failure_count, last_state
                 )
                 VALUES (
                     ?, ?, ?,
                     COALESCE((SELECT success_count FROM job_runs WHERE job_name = ?), 0) + 1,
-                    COALESCE((SELECT failure_count FROM job_runs WHERE job_name = ?), 0)
+                    COALESCE((SELECT failure_count FROM job_runs WHERE job_name = ?), 0),
+                    ?
                 )
-            """, (job_name, time_now_ms, time_now_ms, job_name, job_name))
+            """, (job_name, time_now_ms, time_now_ms, job_name, job_name, json.dumps(new_state)))
 
             db.commit()
 
@@ -118,14 +119,15 @@ class JobHandler(Handler):
             # Track failure but don't update state
             cursor.execute("""
                 INSERT OR REPLACE INTO job_runs (
-                    job_name, last_run_ms, last_failure_ms, failure_count, success_count
+                    job_name, last_run_ms, last_failure_ms, failure_count, success_count, last_state
                 )
                 VALUES (
                     ?, ?, ?,
                     COALESCE((SELECT failure_count FROM job_runs WHERE job_name = ?), 0) + 1,
-                    COALESCE((SELECT success_count FROM job_runs WHERE job_name = ?), 0)
+                    COALESCE((SELECT success_count FROM job_runs WHERE job_name = ?), 0),
+                    ?
                 )
-            """, (job_name, time_now_ms, time_now_ms, job_name, job_name))
+            """, (job_name, time_now_ms, time_now_ms, job_name, job_name, json.dumps(state)))
             db.commit()
 
             print(f"[JobHandler] Job {job_name} returned failure")

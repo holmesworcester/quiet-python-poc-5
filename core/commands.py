@@ -32,8 +32,12 @@ class CommandRegistry:
 
         command = self._commands[name]
 
-        # Execute command with new signature: (params) -> Envelope or List[Envelope]
-        result = command(params)
+        # Add db to params so commands can access it if needed
+        params_with_db = params.copy()
+        params_with_db['_db'] = db
+
+        # Execute command with params (including _db)
+        result = command(params_with_db)
 
         # Handle both single envelope and list of envelopes
         if isinstance(result, list):
@@ -54,6 +58,10 @@ class CommandRegistry:
     def list_commands(self) -> List[str]:
         """Return list of registered command names."""
         return sorted(self._commands.keys())
+
+    def has_command(self, name: str) -> bool:
+        """Check if a command is registered."""
+        return name in self._commands
 
 
 command_registry = CommandRegistry()

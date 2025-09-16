@@ -14,11 +14,14 @@ def create_message(params: Dict[str, Any]) -> dict[str, Any]:
 
     Returns an envelope with unsigned message event.
     """
-    # Extract parameters with sensible defaults
+    # Extract parameters - frontend provides peer_id directly
     content = params.get('content', '') or 'empty message'
     channel_id = params.get('channel_id', '') or 'dummy-channel-id'
-    identity_id = params.get('identity_id', '') or 'dummy-identity-id'
-    
+    peer_id = params.get('peer_id', '')  # Frontend provides peer_id directly
+
+    if not peer_id:
+        raise ValueError("peer_id is required for create_message")
+
     # Create message event (unsigned)
     event: Dict[str, Any] = {
         'type': 'message',
@@ -26,25 +29,25 @@ def create_message(params: Dict[str, Any]) -> dict[str, Any]:
         'channel_id': channel_id,
         'group_id': '',  # Will be filled by resolve_deps
         'network_id': '',  # Will be filled by resolve_deps
-        'peer_id': identity_id,
+        'peer_id': peer_id,  # The peer event ID for this identity
         'content': content,
         'created_at': int(time.time() * 1000),
         'signature': ''  # Will be filled by sign handler
     }
-    
+
     # Create envelope
     envelope: dict[str, Any] = {
         'event_plaintext': event,
         'event_type': 'message',
         'self_created': True,
-        'peer_id': identity_id,
-        'network_id': '',  # Will be filled by resolve_deps  
+        'peer_id': peer_id,  # Peer that will sign this
+        'network_id': '',  # Will be filled by resolve_deps
         'deps': [
-            f"identity:{identity_id}",  # Need identity for signing
-            f"channel:{channel_id}"  # Need channel for group_id/network_id
+            f"channel:{channel_id}",  # Need channel for group_id/network_id
+            f"peer:{peer_id}"  # Need peer event for verification
         ]
     }
-    
+
     return envelope
 
 

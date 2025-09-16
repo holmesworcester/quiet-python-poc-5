@@ -14,12 +14,15 @@ def create_channel(params: Dict[str, Any]) -> dict[str, Any]:
 
     Returns an envelope with unsigned channel event.
     """
-    # Extract parameters with sensible defaults
+    # Extract parameters - frontend provides peer_id
     name = params.get('name', '') or 'unnamed-channel'
     group_id = params.get('group_id', '') or 'dummy-group-id'
-    identity_id = params.get('identity_id', '') or 'dummy-identity-id'
+    peer_id = params.get('peer_id', '')  # Frontend provides peer_id
     network_id = params.get('network_id', '') or 'dummy-network-id'
-    
+
+    if not peer_id:
+        raise ValueError("peer_id is required for create_channel")
+
     # Create channel event (unsigned)
     event: Dict[str, Any] = {
         'type': 'channel',
@@ -27,17 +30,17 @@ def create_channel(params: Dict[str, Any]) -> dict[str, Any]:
         'group_id': group_id,
         'name': name,
         'network_id': network_id,
-        'creator_id': identity_id,
+        'creator_id': peer_id,  # Creator is identified by their peer
         'created_at': int(time.time() * 1000),
         'signature': ''  # Will be filled by sign handler
     }
-    
+
     # Create envelope
     envelope: dict[str, Any] = {
         'event_plaintext': event,
         'event_type': 'channel',
         'self_created': True,
-        'peer_id': identity_id,
+        'peer_id': peer_id,  # Peer that will sign this
         'network_id': network_id,
         'deps': [f"group:{group_id}"]  # Channel depends on the group existing
     }

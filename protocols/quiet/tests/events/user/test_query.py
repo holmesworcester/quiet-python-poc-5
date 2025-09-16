@@ -2,281 +2,235 @@
 Tests for user event type query (list).
 """
 import pytest
-import sys
-from pathlib import Path
-
-# Add project root to path
-test_dir = Path(__file__).parent
-protocol_dir = test_dir.parent.parent.parent.parent
-project_root = protocol_dir.parent.parent
-sys.path.insert(0, str(project_root))
-
+import sqlite3
+import tempfile
+import os
 from protocols.quiet.events.user.queries import get as get_users, get_user, get_user_by_peer_id, count_users, is_user_in_network
-from protocols.quiet.events.user.commands import create_user
-from protocols.quiet.events.identity.commands import create_identity
-from protocols.quiet.events.network.commands import create_network
-from core.pipeline import PipelineRunner
+from core.db import get_connection, init_database, ReadOnlyConnection
 
 
 class TestUserQuery:
     """Test user queries."""
-    
-    @pytest.fixture
-    def setup_users(self, initialized_db):
-        """Create multiple users for testing."""
-        # Create two networks
-        identity1_envelope = create_identity({"network_id": "network1"})
-        # Process through pipeline if needed
-        identity1_id = identity1_envelope["event_plaintext"]["peer_id"]
-        
-        identity2_envelope = create_identity({"network_id": "network2"})
-        # Process through pipeline if needed
-        identity2_id = identity2_envelope["event_plaintext"]["peer_id"]
-        
-        # Create network records
-        network1_envelope, identity1_envelope = create_network({
-            "name": "Network 1",
-            "identity_id": identity1_id
-        })
-        # Process through pipeline if needed
-        network2_envelope, identity2_envelope = create_network({
-            "name": "Network 2", 
-            "identity_id": identity2_id
-        })
-        # Process through pipeline if needed
-        # Create users
-        users_created = []
-        
-        # Create user in network1
-        user1_envelope = create_user({
-            "identity_id": identity1_id,
-            "address": "192.168.1.100",
-            "port": 8080
-        })
-        # Process through pipeline if needed
-        users_created.append(user1_envelope["event_plaintext"])
-        
-        # Create another identity in network1 and its user
-        identity3_envelope = create_identity({"network_id": "network1"})
-        # Process through pipeline if needed
-        identity3_id = identity3_envelope["event_plaintext"]["peer_id"]
-        
-        user2_envelope = create_user({
-            "identity_id": identity3_id,
-            "address": "192.168.1.101",
-            "port": 8081
-        })
-        # Process through pipeline if needed
-        users_created.append(user2_envelope["event_plaintext"])
-        
-        # Create user in network2
-        user3_envelope = create_user({
-            "identity_id": identity2_id,
-            "address": "10.0.0.1",
-            "port": 9000
-        })
-        # Process through pipeline if needed
-        users_created.append(user3_envelope["event_plaintext"])
-        
-        return {
-            "network1_id": "network1",
-            "network2_id": "network2",
-            "identity1_id": identity1_id,
-            "identity2_id": identity2_id,
-            "identity3_id": identity3_id,
-            "users": users_created
-        }
-    
+
+    def setup_method(self):
+        """Set up test database with sample data."""
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        os.close(self.db_fd)
+        self.db = get_connection(self.db_path)
+
+        # Get the protocol directory properly
+        import pathlib
+        test_dir = pathlib.Path(__file__).parent
+        protocol_dir = test_dir.parent.parent.parent
+        init_database(self.db, str(protocol_dir))
+
+        # Insert sample user data
+        self.db.execute("""
+            INSERT INTO users (user_id, peer_id, network_id, name, joined_at, invite_pubkey)
+            VALUES
+                ('user1', 'peer1', 'network1', 'Alice', 1000, 'invite1'),
+                ('user2', 'peer2', 'network1', 'Bob', 2000, 'invite2'),
+                ('user3', 'peer3', 'network2', 'Charlie', 3000, 'invite3')
+        """)
+
+        # Insert sample group membership data
+        self.db.execute("""
+            INSERT INTO group_members (group_id, user_id, added_by, added_at)
+            VALUES
+                ('group1', 'user1', 'user1', 1000),
+                ('group1', 'user2', 'user1', 2000),
+                ('group2', 'user3', 'user3', 3000)
+        """)
+
+        # Insert sample identities for query access control
+        self.db.execute("""
+            INSERT INTO core_identities (identity_id, name, public_key, private_key, created_at)
+            VALUES
+                ('test_identity', 'Test Identity', 'test_public_key', 'test_private_key', 1000)
+        """)
+
+        self.db.commit()
+
+        # Create read-only connection for queries
+        self.ro_db = ReadOnlyConnection(self.db)
+
+    def teardown_method(self):
+        """Clean up test database."""
+        self.db.close()
+        os.unlink(self.db_path)
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_users(self, initialized_db, setup_users):
-        """Test listing users in a network."""
-        data = setup_users
-        
-        # List users in network1
-        users = get_users(initialized_db, {"network_id": data["network1_id"]})
-        assert len(users) == 2
-        
-        # Check users are sorted by joined_at DESC
-        for i in range(len(users) - 1):
-            assert users[i]["joined_at"] >= users[i + 1]["joined_at"]
-        
-        # List users in network2
-        users = get_users(initialized_db, {"network_id": data["network2_id"]})
-        assert len(users) == 1
-        assert users[0]["peer_id"] == data["identity2_id"]
-    
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_get_users_with_limit(self, initialized_db, setup_users):
-        """Test limiting number of users returned."""
-        data = setup_users
-        
-        users = get_users(initialized_db, {
-            "network_id": data["network1_id"],
-            "limit": 1
+    def test_get_users(self):
+        """Test getting all users in a network."""
+        result = get_users(self.ro_db, {
+            'identity_id': 'test_identity',
+            'network_id': 'network1'
         })
-        
-        assert len(users) == 1
-    
+
+        assert len(result) == 2
+        names = [user['name'] for user in result]
+        assert 'Alice' in names
+        assert 'Bob' in names
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_users_with_offset(self, initialized_db, setup_users):
-        """Test pagination with offset."""
-        data = setup_users
-        
-        # Get first user
-        page1 = get_users(initialized_db, {
-            "network_id": data["network1_id"],
-            "limit": 1,
-            "offset": 0
+    def test_get_users_different_network(self):
+        """Test getting users from different network."""
+        result = get_users(self.ro_db, {
+            'identity_id': 'test_identity',
+            'network_id': 'network2'
         })
-        assert len(page1) == 1
-        
-        # Get second user
-        page2 = get_users(initialized_db, {
-            "network_id": data["network1_id"],
-            "limit": 1,
-            "offset": 1
-        })
-        assert len(page2) == 1
-        
-        # Different users
-        assert page1[0]["user_id"] != page2[0]["user_id"]
-    
+
+        assert len(result) == 1
+        assert result[0]['name'] == 'Charlie'
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_users_includes_name(self, initialized_db, setup_users):
-        """Test that user list includes identity names."""
-        data = setup_users
-        
-        users = get_users(initialized_db, {"network_id": data["network1_id"]})
-        
-        # Names should be included from identity join
-        for user in users:
-            assert "name" in user
-            assert user["name"] is not None
-    
+    def test_get_users_requires_identity(self):
+        """Test that get_users requires identity_id."""
+        with pytest.raises(ValueError, match="identity_id is required"):
+            get_users(self.ro_db, {'network_id': 'network1'})
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_user(self, initialized_db, setup_users):
+    def test_get_users_requires_network(self):
+        """Test that get_users requires network_id."""
+        with pytest.raises(ValueError, match="network_id is required"):
+            get_users(self.ro_db, {'identity_id': 'test_identity'})
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_get_user_by_id(self):
         """Test getting a specific user by ID."""
-        data = setup_users
-        user_id = data["users"][0]["user_id"]
-        
-        user = get_user(initialized_db, {"user_id": user_id})
-        
-        assert user is not None
-        assert user["user_id"] == user_id
-        assert user["peer_id"] == data["identity1_id"]
-        assert user["network_id"] == data["network1_id"]
-        assert "name" in user
-    
+        result = get_user(self.ro_db, {'user_id': 'user1'})
+
+        assert result is not None
+        assert result['name'] == 'Alice'
+        assert result['peer_id'] == 'peer1'
+        assert result['network_id'] == 'network1'
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_user_not_found(self, initialized_db, setup_users):
-        """Test getting non-existent user returns None."""
-        user = get_user(initialized_db, {"user_id": "non-existent"})
-        assert user is None
-    
+    def test_get_user_not_found(self):
+        """Test getting a non-existent user."""
+        result = get_user(self.ro_db, {'user_id': 'nonexistent'})
+
+        assert result is None
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_user_by_peer_id(self, initialized_db, setup_users):
+    def test_get_user_by_peer_id(self):
         """Test getting user by peer ID."""
-        data = setup_users
-        
-        user = get_user_by_peer_id(initialized_db, {
-            "peer_id": data["identity1_id"],
-            "network_id": data["network1_id"]
+        result = get_user_by_peer_id(self.ro_db, {
+            'peer_id': 'peer2',
+            'network_id': 'network1'
         })
-        
-        assert user is not None
-        assert user["peer_id"] == data["identity1_id"]
-        assert user["network_id"] == data["network1_id"]
-    
+
+        assert result is not None
+        assert result['name'] == 'Bob'
+        assert result['user_id'] == 'user2'
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_user_by_peer_id_not_in_network(self, initialized_db, setup_users):
+    def test_get_user_by_peer_id_not_found(self):
+        """Test getting user by non-existent peer ID."""
+        result = get_user_by_peer_id(self.ro_db, {
+            'peer_id': 'nonexistent',
+            'network_id': 'network1'
+        })
+
+        assert result is None
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_get_user_by_peer_id_wrong_network(self):
         """Test getting user by peer ID in wrong network."""
-        data = setup_users
-        
-        # identity1 is in network1, not network2
-        user = get_user_by_peer_id(initialized_db, {
-            "peer_id": data["identity1_id"],
-            "network_id": data["network2_id"]
+        result = get_user_by_peer_id(self.ro_db, {
+            'peer_id': 'peer1',
+            'network_id': 'network2'
         })
-        
-        assert user is None
-    
+
+        assert result is None
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_count_users(self, initialized_db, setup_users):
-        """Test counting users in networks."""
-        data = setup_users
-        
-        # Count in network1
-        count = count_users(initialized_db, {"network_id": data["network1_id"]})
-        assert count == 2
-        
-        # Count in network2
-        count = count_users(initialized_db, {"network_id": data["network2_id"]})
-        assert count == 1
-        
-        # Count in non-existent network
-        count = count_users(initialized_db, {"network_id": "non-existent"})
-        assert count == 0
-    
+    def test_count_users(self):
+        """Test counting users."""
+        # Count users in network1
+        result = count_users(self.ro_db, {'network_id': 'network1'})
+        assert result == 2
+
+        # Count users in network2
+        result = count_users(self.ro_db, {'network_id': 'network2'})
+        assert result == 1
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_is_user_in_network(self, initialized_db, setup_users):
-        """Test checking if peer is user in network."""
-        data = setup_users
-        
-        # identity1 is in network1
-        assert is_user_in_network(initialized_db, {
-            "peer_id": data["identity1_id"],
-            "network_id": data["network1_id"]
-        }) == True
-        
-        # identity1 is not in network2
-        assert is_user_in_network(initialized_db, {
-            "peer_id": data["identity1_id"],
-            "network_id": data["network2_id"]
-        }) == False
-        
-        # Non-existent peer
-        assert is_user_in_network(initialized_db, {
-            "peer_id": "non-existent",
-            "network_id": data["network1_id"]
-        }) == False
-    
+    def test_is_user_in_network(self):
+        """Test checking if user is in network."""
+        # User in network
+        result = is_user_in_network(self.ro_db, {
+            'peer_id': 'peer1',
+            'network_id': 'network1'
+        })
+        assert result is True
+
+        # User not in network
+        result = is_user_in_network(self.ro_db, {
+            'peer_id': 'peer1',
+            'network_id': 'network2'
+        })
+        assert result is False
+
+        # Non-existent user
+        result = is_user_in_network(self.ro_db, {
+            'peer_id': 'nonexistent',
+            'network_id': 'network1'
+        })
+        assert result is False
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_get_users_empty_network(self, initialized_db):
-        """Test listing users in network with no users."""
-        users = get_users(initialized_db, {"network_id": "empty-network"})
-        assert users == []
-    
+    def test_get_users_with_limit(self):
+        """Test getting users with limit."""
+        result = get_users(self.ro_db, {
+            'identity_id': 'test_identity',
+            'network_id': 'network1',
+            'limit': 1
+        })
+
+        assert len(result) == 1
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_query_missing_params(self, initialized_db):
-        """Test that queries validate required parameters."""
-        # get_users missing network_id
-        with pytest.raises(ValueError, match="network_id is required"):
-            get_users(initialized_db, {})
-        
-        # get_user missing user_id
-        with pytest.raises(ValueError, match="user_id is required"):
-            get_user(initialized_db, {})
-        
-        # get_user_by_peer_id missing params
-        with pytest.raises(ValueError, match="peer_id and network_id are required"):
-            get_user_by_peer_id(initialized_db, {"peer_id": "test"})
-        
-        # count_users missing network_id
-        with pytest.raises(ValueError, match="network_id is required"):
-            count_users(initialized_db, {})
-        
-        # is_user_in_network missing params
-        with pytest.raises(ValueError, match="peer_id and network_id are required"):
-            is_user_in_network(initialized_db, {"network_id": "test"})
+    def test_get_users_with_offset(self):
+        """Test getting users with offset."""
+        # Get all users first to know the order
+        all_users = get_users(self.ro_db, {
+            'identity_id': 'test_identity',
+            'network_id': 'network1'
+        })
+
+        # Get users with offset
+        result = get_users(self.ro_db, {
+            'identity_id': 'test_identity',
+            'network_id': 'network1',
+            'offset': 1
+        })
+
+        assert len(result) == 1
+        assert result[0]['user_id'] == all_users[1]['user_id']
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_get_users_ordered_by_joined_at(self):
+        """Test that users are ordered by joined_at DESC."""
+        result = get_users(self.ro_db, {
+            'identity_id': 'test_identity',
+            'network_id': 'network1'
+        })
+
+        # Should be in reverse order: Bob (2000), Alice (1000)
+        assert result[0]['name'] == 'Bob'
+        assert result[1]['name'] == 'Alice'

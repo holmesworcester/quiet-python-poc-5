@@ -4,6 +4,7 @@ Database setup and utilities with read-only support.
 import sqlite3
 from typing import Any, Optional
 import os
+import glob
 
 
 def _load_schema_file(schema_file: str, conn: sqlite3.Connection) -> None:
@@ -29,19 +30,20 @@ def init_database(conn: sqlite3.Connection, protocol_dir: Optional[str] = None) 
     """Initialize database schema.
 
     The framework defines core tables and loads protocol-specific schema from:
-    1. Handler-specific .schema.sql files in handlers/
-    2. Event type-specific .schema.sql files in events/
-    3. Any top-level .schema.sql files in the protocol directory
+    1. Handler-specific .sql files in handlers/
+    2. Event type-specific .sql files in events/
+    3. Any top-level .sql files in the protocol directory
     """
 
-    # Core tables are now initialized by protocol handlers if needed
+    # Load core framework schemas
+    core_dir = os.path.dirname(os.path.abspath(__file__))
+    for schema_file in glob.glob(os.path.join(core_dir, '*.sql')):
+        _load_schema_file(schema_file, conn)
 
     if protocol_dir:
-        import glob
-        import os
         
         # Load any top-level schema files in the protocol directory
-        for schema_file in glob.glob(os.path.join(protocol_dir, '*.schema.sql')):
+        for schema_file in glob.glob(os.path.join(protocol_dir, '*.sql')):
             _load_schema_file(schema_file, conn)
         
         # Load event type schemas
@@ -51,11 +53,11 @@ def init_database(conn: sqlite3.Connection, protocol_dir: Optional[str] = None) 
             for event_type_dir in os.listdir(events_dir):
                 event_type_path = os.path.join(events_dir, event_type_dir)
                 if os.path.isdir(event_type_path):
-                    for schema_file in glob.glob(os.path.join(event_type_path, '*.schema.sql')):
+                    for schema_file in glob.glob(os.path.join(event_type_path, '*.sql')):
                         _load_schema_file(schema_file, conn)
-            
+
             # Also check for schemas directly in events/
-            for schema_file in glob.glob(os.path.join(events_dir, '*.schema.sql')):
+            for schema_file in glob.glob(os.path.join(events_dir, '*.sql')):
                 _load_schema_file(schema_file, conn)
         
         # Load handler schemas
@@ -65,10 +67,10 @@ def init_database(conn: sqlite3.Connection, protocol_dir: Optional[str] = None) 
             for handler_dir in os.listdir(handlers_dir):
                 handler_path = os.path.join(handlers_dir, handler_dir)
                 if os.path.isdir(handler_path):
-                    for schema_file in glob.glob(os.path.join(handler_path, '*.schema.sql')):
+                    for schema_file in glob.glob(os.path.join(handler_path, '*.sql')):
                         _load_schema_file(schema_file, conn)
-            
-            # Check for .sql files directly in handlers/ (new naming convention)
+
+            # Check for .sql files directly in handlers/
             for schema_file in glob.glob(os.path.join(handlers_dir, '*.sql')):
                 _load_schema_file(schema_file, conn)
     

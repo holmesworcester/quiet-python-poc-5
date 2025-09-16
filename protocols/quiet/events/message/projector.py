@@ -23,7 +23,8 @@ def project(envelope: dict[str, Any]) -> List[dict[str, Any]]:
     channel_id = event_data['channel_id']
     group_id = event_data.get('group_id', '')
     network_id = event_data.get('network_id', '')
-    author_id = event_data['peer_id']  # Using peer_id as per MessageEventData
+    # TODO: peer_id should be actual peer event ID, but we're using identity_id for now
+    author_id = event_data['peer_id']  # Will be identity_id until we fix peer lookup
     content = event_data['content']
     created_at = event_data['created_at']
     

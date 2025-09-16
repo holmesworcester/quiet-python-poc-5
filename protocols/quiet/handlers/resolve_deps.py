@@ -33,8 +33,8 @@ def filter_func(envelope: dict[str, Any]) -> bool:
     if envelope.get('validated') is True:
         return True
 
-    # Block case: events with missing deps need to be blocked
-    if envelope.get('missing_deps') is True:
+    # Block case: events with missing deps need to be blocked (requires event_id)
+    if envelope.get('missing_deps') is True and envelope.get('event_id'):
         return True
 
     return False
@@ -66,7 +66,18 @@ def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, 
         # This is a newly validated event - check for blocked events
         event_id = envelope.get('event_id')
         if event_id:
+            # Track this completed event for placeholder resolution
+            track_completed_event(envelope, db)
+
+            # Check for events waiting on this one
             unblocked = unblock_waiting_events(event_id, db)
+
+            # Also check for events waiting on placeholders that can now be resolved
+            request_id = envelope.get('request_id')
+            if request_id:
+                placeholder_unblocked = unblock_placeholder_events(request_id, db)
+                results.extend(placeholder_unblocked)
+
             results.extend(unblocked)
         # Do NOT re-emit the validated event itself
 
@@ -96,25 +107,53 @@ def resolve_dependencies(envelope: dict[str, Any], db: sqlite3.Connection) -> Op
         # Filter out invite dependencies for self-created user events
         deps_needed = [dep for dep in deps_needed if not dep.startswith('invite:')]
 
+    # Check for placeholders in dependencies
+    has_placeholders = any(dep.startswith('@generated:') for dep in deps_needed)
+
+    if has_placeholders:
+        # Try to resolve placeholders from completed events in the same request
+        request_id = envelope.get('request_id')
+        if request_id:
+            deps_needed = resolve_placeholders_in_list(deps_needed, request_id, db)
+            envelope['deps'] = deps_needed  # Update the deps list with resolved placeholders
+
+            # Also resolve placeholders in event_plaintext if needed
+            if 'event_plaintext' in envelope:
+                envelope['event_plaintext'] = resolve_placeholders_in_dict(
+                    envelope['event_plaintext'], request_id, db
+                )
+
+            # Also resolve placeholder in peer_id if it's a placeholder
+            peer_id = envelope.get('peer_id', '')
+            if peer_id.startswith('@generated:'):
+                resolved_peer_id = resolve_single_placeholder(peer_id, request_id, db)
+                if resolved_peer_id:
+                    envelope['peer_id'] = resolved_peer_id
+
     # Try to resolve each dependency
     resolved_deps = {}
     missing_deps = []
-    
+
     for dep_ref in deps_needed:
+        # Skip unresolved placeholders
+        if dep_ref.startswith('@generated:'):
+            missing_deps.append(dep_ref)
+            continue
+
         dep_type, dep_id = parse_dep_ref(dep_ref)
         dep_data = fetch_dependency(dep_id, dep_type, db)
-        
+
         if dep_data:
             resolved_deps[dep_ref] = dep_data
         else:
             missing_deps.append(dep_ref)
-    
+
     if missing_deps:
         # Still have missing dependencies
         envelope['missing_deps'] = True
         envelope['missing_deps_list'] = missing_deps
         envelope['deps_included_and_valid'] = False
-        
+
         # Will be blocked by the unblocking logic
         return envelope
     else:
@@ -230,6 +269,152 @@ def are_all_deps_satisfied(event_id: str, db: sqlite3.Connection) -> bool:
     return True
 
 
+def track_completed_event(envelope: dict[str, Any], db: sqlite3.Connection) -> None:
+    """Track a completed event for placeholder resolution."""
+    event_id = envelope.get('event_id')
+    event_type = envelope.get('event_type')
+    request_id = envelope.get('request_id')
+
+    if not event_id or not event_type or not request_id:
+        return
+
+    # Store in a tracking table for placeholder resolution
+    try:
+        db.execute("""
+            INSERT OR REPLACE INTO completed_events
+            (event_id, event_type, request_id, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (event_id, event_type, request_id, int(time.time() * 1000)))
+    except:
+        pass  # Table might not exist yet
+
+
+def unblock_placeholder_events(request_id: str, db: sqlite3.Connection) -> List[dict[str, Any]]:
+    """Check for blocked events with placeholders that can now be resolved."""
+    unblocked = []
+
+    # Find blocked events with placeholder dependencies
+    cursor = db.execute("""
+        SELECT event_id, envelope_json
+        FROM blocked_events
+        WHERE missing_deps LIKE '%@generated:%'
+    """)
+
+    for row in cursor:
+        event_id, envelope_json = row
+        try:
+            envelope = json.loads(envelope_json)
+
+            # Only process events from the same request
+            if envelope.get('request_id') != request_id:
+                continue
+
+            # Try to resolve placeholders
+            original_deps = envelope.get('deps', [])
+            resolved_deps = resolve_placeholders_in_list(original_deps, request_id, db)
+
+            # Check if any placeholders were resolved
+            if resolved_deps != original_deps:
+                envelope['deps'] = resolved_deps
+
+                # Also resolve placeholders in event data
+                if 'event_plaintext' in envelope:
+                    envelope['event_plaintext'] = resolve_placeholders_in_dict(
+                        envelope['event_plaintext'], request_id, db
+                    )
+
+                # Resolve peer_id placeholder if needed
+                peer_id = envelope.get('peer_id', '')
+                if peer_id.startswith('@generated:'):
+                    resolved_peer_id = resolve_single_placeholder(peer_id, request_id, db)
+                    if resolved_peer_id:
+                        envelope['peer_id'] = resolved_peer_id
+
+                # Check if all placeholders are now resolved
+                if not any(dep.startswith('@generated:') for dep in envelope.get('deps', [])):
+                    # Remove from blocked events
+                    db.execute("DELETE FROM blocked_events WHERE event_id = ?", (event_id,))
+                    db.execute("DELETE FROM blocked_event_deps WHERE event_id = ?", (event_id,))
+
+                    # Mark for re-processing
+                    envelope['unblocked'] = True
+                    envelope['retry_count'] = envelope.get('retry_count', 0) + 1
+                    envelope.pop('missing_deps', None)
+                    envelope.pop('missing_deps_list', None)
+                    envelope['deps_included_and_valid'] = False
+
+                    unblocked.append(envelope)
+                else:
+                    # Update blocked event with partially resolved placeholders
+                    db.execute("""
+                        UPDATE blocked_events
+                        SET envelope_json = ?
+                        WHERE event_id = ?
+                    """, (json.dumps(envelope), event_id))
+
+        except Exception as e:
+            continue
+
+    return unblocked
+
+
+def resolve_single_placeholder(placeholder: str, request_id: str, db: sqlite3.Connection) -> Optional[str]:
+    """Resolve a single placeholder to an actual event ID."""
+    if not placeholder.startswith('@generated:'):
+        return placeholder
+
+    # Parse placeholder format: @generated:type:index
+    parts = placeholder.split(':')
+    if len(parts) != 3:
+        return None
+
+    event_type = parts[1]
+    index = int(parts[2])
+
+    # Look for completed events of this type in the same request
+    cursor = db.execute("""
+        SELECT event_id FROM completed_events
+        WHERE event_type = ?
+        AND request_id = ?
+        ORDER BY created_at
+        LIMIT 1 OFFSET ?
+    """, (event_type, request_id, index))
+
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def resolve_placeholders_in_list(items: List[str], request_id: str, db: sqlite3.Connection) -> List[str]:
+    """Resolve placeholders in a list of strings."""
+    resolved = []
+    for item in items:
+        if item.startswith('@generated:'):
+            resolved_id = resolve_single_placeholder(item, request_id, db)
+            resolved.append(resolved_id if resolved_id else item)
+        else:
+            resolved.append(item)
+    return resolved
+
+
+def resolve_placeholders_in_dict(data: Dict[str, Any], request_id: str, db: sqlite3.Connection) -> Dict[str, Any]:
+    """Recursively resolve placeholders in a dictionary."""
+    result = {}
+    for key, value in data.items():
+        if isinstance(value, str) and value.startswith('@generated:'):
+            resolved = resolve_single_placeholder(value, request_id, db)
+            result[key] = resolved if resolved else value
+        elif isinstance(value, dict):
+            result[key] = resolve_placeholders_in_dict(value, request_id, db)
+        elif isinstance(value, list):
+            result[key] = [
+                resolve_single_placeholder(v, request_id, db) if isinstance(v, str) and v.startswith('@generated:') else v
+                for v in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
 def parse_dep_ref(dep_ref: str) -> Tuple[str, str]:
     """Parse dependency reference like 'identity:abc123' into (type, id)."""
     if ':' in dep_ref:
@@ -243,42 +428,10 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
     """Fetch a dependency - either a validated event or local secret."""
     
     if dep_type == 'identity':
-        # Fetch from identities table (local-only events)
-        cursor = db.execute("""
-            SELECT identity_id, network_id, name, public_key, private_key, created_at
-            FROM identities
-            WHERE identity_id = ?
-        """, (dep_id,))
+        # Identity is now a core feature, not stored as events
+        # This shouldn't be called anymore since we removed identity dependencies
+        return None
 
-        row = cursor.fetchone()
-        if not row:
-            return None
-
-        # Reconstruct the identity event
-        # row columns: identity_id, network_id, name, public_key, private_key, created_at
-        event_plaintext = {
-            'type': 'identity',
-            'name': row[2],  # name
-            'network_id': row[1],  # network_id
-            'public_key': row[3],  # public_key
-            'created_at': row[5]  # created_at
-        }
-
-        envelope = {
-            'event_plaintext': event_plaintext,
-            'event_type': 'identity',
-            'event_id': dep_id,
-            'validated': True
-        }
-
-        # Include private key in local metadata
-        if row[4]:  # private_key
-            envelope['local_metadata'] = {
-                'private_key': row[4] if isinstance(row[4], str) else row[4].hex()
-            }
-
-        return envelope
-        
     elif dep_type == 'transit_key':
         # Transit keys are local secrets
         cursor = db.execute("""
@@ -314,9 +467,50 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
                 'validated': True
             }
         return None
-        
+
+    elif dep_type == 'peer':
+        # For peer events, always check peers table first to get full data
+        # First try to find by peer_id (most common case)
+        cursor = db.execute("""
+            SELECT peer_id, public_key, identity_id, network_id, created_at
+            FROM peers
+            WHERE peer_id = ?
+        """, (dep_id,))
+
+        row = cursor.fetchone()
+
+        # If not found by peer_id and it looks like it could be an identity_id,
+        # try looking up by identity_id (for legacy compatibility)
+        if not row and len(dep_id) == 32:  # Could be an identity_id
+            cursor = db.execute("""
+                SELECT peer_id, public_key, identity_id, network_id, created_at
+                FROM peers
+                WHERE identity_id = ?
+                LIMIT 1
+            """, (dep_id,))
+            row = cursor.fetchone()
+
+        if row:
+            # row columns: peer_id, public_key, identity_id, network_id, created_at
+            event_plaintext = {
+                'type': 'peer',
+                'public_key': row[1],  # public_key
+                'identity_id': row[2],  # identity_id
+                'network_id': row[3],  # network_id
+                'created_at': row[4]  # created_at
+            }
+            # Also update the event's peer_id to the actual peer_id if we resolved by identity
+            actual_peer_id = row[0]
+            return {
+                'event_plaintext': event_plaintext,
+                'event_type': 'peer',
+                'event_id': actual_peer_id,  # Use actual peer_id
+                'validated': True
+            }
+        return None
+
     else:
-        # For now, check if event exists in events table
+        # For other event types, check if event exists in events table
         cursor = db.execute("""
             SELECT event_type
             FROM events
@@ -332,32 +526,6 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
                 'event_id': dep_id,
                 'validated': True
             }
-
-        # If not in events table, might be in a type-specific table
-        # For peer events, check peers table
-        if dep_type == 'peer':
-            cursor = db.execute("""
-                SELECT peer_id, public_key, identity_id, network_id, created_at
-                FROM peers
-                WHERE peer_id = ?
-            """, (dep_id,))
-
-            row = cursor.fetchone()
-            if row:
-                # row columns: peer_id, public_key, identity_id, network_id, created_at
-                event_plaintext = {
-                    'type': 'peer',
-                    'public_key': row[1],  # public_key
-                    'identity_id': row[2],  # identity_id
-                    'network_id': row[3],  # network_id
-                    'created_at': row[4]  # created_at
-                }
-                return {
-                    'event_plaintext': event_plaintext,
-                    'event_type': 'peer',
-                    'event_id': dep_id,
-                    'validated': True
-                }
 
         return None
 

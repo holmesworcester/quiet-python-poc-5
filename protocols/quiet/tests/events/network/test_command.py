@@ -2,110 +2,149 @@
 Tests for network event type command (create).
 """
 import pytest
-import sys
-import json
-from pathlib import Path
-from typing import Dict, Any
-
-# Add project root to path
-test_dir = Path(__file__).parent
-protocol_dir = test_dir.parent.parent.parent.parent
-project_root = protocol_dir.parent.parent
-sys.path.insert(0, str(project_root))
-
+import tempfile
+import os
 from protocols.quiet.events.network.commands import create_network
-from core.crypto import verify
+from protocols.quiet.events.peer.commands import create_peer
+from core.db import get_connection, init_database
+from core.identity import create_identity as create_core_identity
 
 
 class TestNetworkCommand:
     """Test network creation command."""
-    
+
+    def setup_method(self):
+        """Set up test database."""
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        os.close(self.db_fd)
+        self.db = get_connection(self.db_path)
+
+        # Get the protocol directory properly
+        import pathlib
+        test_dir = pathlib.Path(__file__).parent
+        protocol_dir = test_dir.parent.parent.parent
+        init_database(self.db, str(protocol_dir))
+
+        # Create a test identity and peer for use in tests
+        self.identity = create_core_identity('Test Creator', db_path=self.db_path)
+        self.peer_params = {
+            'identity_id': self.identity.id,
+            'username': 'TestCreator',
+            '_db': self.db
+        }
+        self.peer_envelope = create_peer(self.peer_params)
+        # Simulate that peer is already created (would be done by pipeline)
+        self.peer_id = 'test_peer_id'  # In reality, this would be generated
+
+    def teardown_method(self):
+        """Clean up test database."""
+        self.db.close()
+        os.unlink(self.db_path)
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_network_basic(self, initialized_db):
+    def test_create_network_basic(self):
         """Test basic network creation."""
         params = {
-            "name": "Test Network"
+            "name": "Test Network",
+            "peer_id": self.peer_id
         }
-        
-        envelopes = create_network(params)
 
-        # Should emit two envelopes: identity event and network event
-        assert len(envelopes) == 2
+        envelope = create_network(params)
 
-        # First envelope should be identity event (must be created first for signing)
-        identity_envelope = envelopes[0]
-        network_envelope = envelopes[1]
-        assert "event_plaintext" in network_envelope
-        assert "event_type" in network_envelope
-        assert network_envelope["event_type"] == "network"
-        assert network_envelope["self_created"] == True
-        
+        # Should return a single envelope
+        assert envelope is not None
+        assert "event_plaintext" in envelope
+        assert "event_type" in envelope
+        assert envelope["event_type"] == "network"
+        assert envelope["self_created"] == True
+
         # Check network event content
-        network_event = network_envelope["event_plaintext"]
+        network_event = envelope["event_plaintext"]
         assert network_event["type"] == "network"
         assert network_event["name"] == "Test Network"
-        assert "network_id" in network_event
-        assert "creator_id" in network_event
+        assert network_event["network_id"] == ''  # Will be filled by crypto handler
+        assert network_event["creator_id"] == self.peer_id
         assert "created_at" in network_event
-        assert "signature" in network_event
-        
-        # Check identity envelope
-        assert identity_envelope["event_type"] == "identity"
-        identity_event = identity_envelope["event_plaintext"]
-        assert identity_event["peer_id"] == network_event["creator_id"]
-        assert identity_event["network_id"] == network_event["network_id"]
-    
+        assert network_event["signature"] == ''  # Will be filled by sign handler
+
+        # Check dependencies
+        assert envelope["deps"] == [f'peer:{self.peer_id}']
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_network_with_creator_name(self, initialized_db):
-        """Test network creation with custom creator name."""
+    def test_create_network_with_identity_id(self):
+        """Test network creation with identity_id (backward compat)."""
         params = {
             "name": "Test Network",
-            "creator_name": "Alice"
+            "identity_id": self.identity.id  # Using identity_id instead of peer_id
         }
-        
-        envelopes = create_network(params)
-        assert len(envelopes) == 2
-        identity_envelope = envelopes[0]
-        network_envelope = envelopes[1]
 
-        # Check that creator identity envelope has custom name
-        identity_event = identity_envelope["event_plaintext"]
-        assert identity_event["name"] == "Alice"
-    
+        envelope = create_network(params)
+
+        # Should still work with identity_id
+        network_event = envelope["event_plaintext"]
+        assert network_event["creator_id"] == self.identity.id
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_network_missing_name(self, initialized_db):
+    def test_create_network_missing_name(self):
         """Test that missing name raises error."""
-        params: Dict[str, Any] = {}
-        
+        params = {
+            "peer_id": self.peer_id
+            # Missing name
+        }
+
         with pytest.raises(ValueError, match="name is required"):
             create_network(params)
-    
+
     @pytest.mark.unit
     @pytest.mark.event_type
-    def test_create_network_envelope_structure(self, initialized_db):
-        """Test that the envelopes have correct structure for pipeline processing."""
+    def test_create_network_empty_name(self):
+        """Test that empty name raises error."""
+        params = {
+            "name": "",
+            "peer_id": self.peer_id
+        }
+
+        with pytest.raises(ValueError, match="name is required"):
+            create_network(params)
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_network_missing_peer_id(self):
+        """Test that missing peer_id raises error."""
         params = {
             "name": "Test Network"
+            # Missing peer_id
         }
-        
-        envelopes = create_network(params)
-        assert len(envelopes) == 2
-        identity_envelope = envelopes[0]
-        network_envelope = envelopes[1]
-        
-        # Check network envelope
-        network_envelope = network_envelope
-        assert network_envelope["event_type"] == "network"
-        assert network_envelope["self_created"] == True
-        assert network_envelope["peer_id"] == network_envelope["event_plaintext"]["creator_id"]
-        assert network_envelope["network_id"] == network_envelope["event_plaintext"]["network_id"]
-        
-        # Check identity envelope
-        identity_envelope = identity_envelope
-        assert identity_envelope["event_type"] == "identity"
-        assert identity_envelope["self_created"] == True
-        assert identity_envelope["peer_id"] == identity_envelope["event_plaintext"]["peer_id"]
-        assert identity_envelope["network_id"] == network_envelope["event_plaintext"]["network_id"]
+
+        with pytest.raises(ValueError, match="peer_id is required"):
+            create_network(params)
+
+    @pytest.mark.unit
+    @pytest.mark.event_type
+    def test_create_network_envelope_structure(self):
+        """Test the structure of the envelope returned by create_network."""
+        params = {
+            "name": "My Network",
+            "peer_id": self.peer_id
+        }
+
+        envelope = create_network(params)
+
+        # Check all required envelope fields
+        assert envelope["event_type"] == "network"
+        assert envelope["self_created"] == True
+        assert envelope["peer_id"] == self.peer_id
+        assert envelope["network_id"] == ''  # Empty initially
+        assert envelope["deps"] == [f'peer:{self.peer_id}']
+
+        # Check event plaintext structure
+        event = envelope["event_plaintext"]
+        assert event["type"] == "network"
+        assert event["network_id"] == ''
+        assert event["name"] == "My Network"
+        assert event["creator_id"] == self.peer_id
+        assert isinstance(event["created_at"], int)
+        assert event["signature"] == ''

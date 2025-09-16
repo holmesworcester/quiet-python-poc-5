@@ -61,3 +61,18 @@ but it's easy to add some protection against it and limit to 100 tries e.g. -- d
 
 we might want to flip the dependency and make group one of the refs of a network event, so that a network can name a main group so it's unambiguous. other groups could name network-id's. i should think about this because it's sensitive. 
 
+there's some ambiguity about what to do with id's for identity events because they're an exception, because they aren't encrypted or shared. and should we store them in the identity table or the event store. 
+bootstrapping these things is difficult to reason about and always a bit of a puzzle. it would be nice if the framework was very opinionated and provided that itself.
+
+what's the relationship between identity, peer, user, and network.
+
+for the first user, it sort of makes sense for the identity and peer and user and first group to be created first, and mentioned in network. that way, once you have the network id, you know what the first group is. and you can validate the user just based on them being included in the network. we could create an admin group too and include that in network as well. then there's a symmetry with joining where the user event refers to invite and network and you can validate that it has all the things. it also creates more symmetry with creating and joining a network, except that the user is created when joining. 
+
+i should really understand resolve_deps for placeholder deps and how that works.
+
+Auth is a tangle and it's good to proceed from a rock-solid document. 
+
+i'm really not convinced about where to put identities. 
+should pubkey get resolved as a dependency so that sign just has the pk in the envelope?
+shoudl we go back to having an identity event like any other with its own table and we just don't share it and exempt it from usual checks?
+should identity be a handler and create identity is an envelope that gets emitted by a command, and then filled in by the handler?

@@ -31,9 +31,8 @@ def validate(envelope: dict[str, Any]) -> bool:
     if event.get('type') != 'user':
         return False
 
-    # Check required fields for new user structure (no user_id in event)
-    required_fields = ['type', 'peer_id', 'network_id', 'group_id',
-                       'name', 'invite_pubkey', 'invite_signature', 'created_at', 'signature']
+    # Check required fields - basic fields always required
+    required_fields = ['type', 'peer_id', 'network_id', 'name', 'created_at', 'signature']
     for field in required_fields:
         if field not in event:
             return False
@@ -42,12 +41,25 @@ def validate(envelope: dict[str, Any]) -> bool:
     if not event['network_id']:
         return False
 
-    # Validate group_id is not empty
-    if not event['group_id']:
+    # If this is an invite-based join, validate invite fields
+    if 'invite_pubkey' in event or 'invite_signature' in event:
+        # Both fields must be present if either is
+        if not (event.get('invite_pubkey') and event.get('invite_signature')):
+            return False
+        # group_id is required for invite-based joins
+        if not event.get('group_id'):
+            return False
+
+    # Validate name is not empty
+    if not event.get('name'):
         return False
 
-    # Validate invite_pubkey is not empty
-    if not event['invite_pubkey']:
+    # Check that peer_id in envelope matches event
+    if 'peer_id' in envelope:
+        if envelope['peer_id'] != event['peer_id']:
+            return False
+    elif not envelope.get('self_created'):
+        # For non-self-created events, peer_id in envelope is required
         return False
 
     # For self-created events, we trust the invite data
@@ -57,31 +69,33 @@ def validate(envelope: dict[str, Any]) -> bool:
         # We don't need the actual invite event to exist
         return True
 
-    # For external user events, we need full validation
-    # Check that dependencies were resolved (invite must exist)
-    if not envelope.get('deps_included_and_valid'):
-        return False
+    # If this is an invite-based user event, validate the invite
+    if 'invite_pubkey' in event:
+        # For external user events with invites, we need full validation
+        # Check that dependencies were resolved (invite must exist)
+        if not envelope.get('deps_included_and_valid'):
+            return False
 
-    resolved_deps = envelope.get('resolved_deps', {})
+        resolved_deps = envelope.get('resolved_deps', {})
 
-    # Find the invite dependency
-    invite_dep_key = f"invite:{event['invite_pubkey']}"
-    if invite_dep_key not in resolved_deps:
-        # Invite dependency must be present for external events
-        return False
+        # Find the invite dependency
+        invite_dep_key = f"invite:{event['invite_pubkey']}"
+        if invite_dep_key not in resolved_deps:
+            # Invite dependency must be present for external events
+            return False
 
-    invite_envelope = resolved_deps[invite_dep_key]
-    invite_event = invite_envelope.get('event_plaintext', {})
+        invite_envelope = resolved_deps[invite_dep_key]
+        invite_event = invite_envelope.get('event_plaintext', {})
 
-    # Verify the invite matches what the user claims
-    if invite_event.get('group_id') != event['group_id']:
-        return False
+        # Verify the invite matches what the user claims
+        if invite_event.get('group_id') != event['group_id']:
+            return False
 
-    # Verify the invite_signature is valid
-    # This proves the user had the invite_secret
-    # (actual signature verification would happen here)
-    if not event['invite_signature']:
-        return False
+        # Verify the invite_signature is valid
+        # This proves the user had the invite_secret
+        # (actual signature verification would happen here)
+        if not event['invite_signature']:
+            return False
 
     # The peer that signed this user event must match the peer_id in the event
     # (signature handler already verified the signature matches the peer)

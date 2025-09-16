@@ -42,6 +42,10 @@ class QueryRegistry:
         """Return list of registered query names."""
         return sorted(self._queries.keys())
 
+    def has_query(self, name: str) -> bool:
+        """Check if a query is registered."""
+        return name in self._queries
+
     def _auto_discover_queries(self, protocol_dir: str) -> None:
         """Auto-discover and register queries from protocol event modules."""
         protocol_path = Path(protocol_dir)

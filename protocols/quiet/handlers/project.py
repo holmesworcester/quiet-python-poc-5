@@ -33,7 +33,8 @@ class ProjectHandler(Handler):
             return False
         return (
             envelope.get('validated') is True and
-            envelope.get('projected') is not True
+            envelope.get('projected') is not True and
+            'event_id' in envelope  # Need event_id for projection
         )
     
     def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:
@@ -99,23 +100,29 @@ class ProjectHandler(Handler):
     
     def _store_local_metadata(self, envelope: dict[str, Any], db: sqlite3.Connection) -> None:
         """Store local metadata for self-created identities."""
+        # Check both local_metadata and secret fields
         local_metadata = envelope.get('local_metadata', {})
+        secret = envelope.get('secret', {})
         event_data = envelope.get('event_plaintext', {})
-        
-        # For identity events, store private key in identities table
-        if envelope.get('event_type') == 'identity' and 'private_key' in local_metadata:
-            db.execute("""
-                INSERT OR REPLACE INTO identities 
-                (identity_id, network_id, private_key, public_key, created_at, name)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                event_data['peer_id'],
-                event_data['network_id'],
-                local_metadata['private_key'],
-                local_metadata['public_key'],
-                event_data['created_at'],
-                event_data.get('name', 'User')
-            ))
+
+        # For identity events, store private key in core_identities table
+        if envelope.get('event_type') == 'identity':
+            # Try to get private key from either location
+            private_key = local_metadata.get('private_key') or secret.get('private_key')
+            public_key = local_metadata.get('public_key') or secret.get('public_key')
+
+            if private_key and public_key:
+                # Get the identity_id from the envelope
+                identity_id = envelope.get('event_id')
+                if identity_id:
+                    from core.identity import store_identity_directly
+                    store_identity_directly(
+                        identity_id,
+                        private_key,
+                        public_key,
+                        event_data.get('name', 'User'),
+                        db
+                    )
     
     def _check_unblocks(self, event_id: str, db: sqlite3.Connection) -> List[dict[str, Any]]:
         """Check if this event unblocks any waiting events."""

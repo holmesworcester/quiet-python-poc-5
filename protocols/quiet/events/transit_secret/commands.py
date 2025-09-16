@@ -25,7 +25,7 @@ def create_transit_secret(params: Dict[str, Any]) -> dict[str, Any]:
     event: Dict[str, Any] = {
         'type': 'transit_secret',
         'transit_key_id': '',  # Will be filled by encrypt handler
-        'peer_id': identity_id,
+        'identity_id': identity_id,  # Core identity that will sign this
         'network_id': network_id,
         'created_at': int(time.time() * 1000),
         'signature': ''  # Will be filled by sign handler
@@ -36,7 +36,7 @@ def create_transit_secret(params: Dict[str, Any]) -> dict[str, Any]:
         'event_plaintext': event,
         'event_type': 'transit_secret',
         'self_created': True,
-        'peer_id': identity_id,
+        'identity_id': identity_id,  # Core identity that will sign this
         'network_id': network_id,
         'deps': [],  # Transit secrets don't depend on other events
         # Store the secret - this won't be shared

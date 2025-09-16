@@ -29,11 +29,11 @@ paths:
   # =========================================================================================
   # NETWORK MANAGEMENT
   # =========================================================================================
-  
-  /networks:
+
+  /peers:
     post:
-      summary: Create a new network
-      operationId: create_network
+      summary: Create a peer for an identity
+      operationId: peer.create
       requestBody:
         required: true
         content:
@@ -41,17 +41,60 @@ paths:
             schema:
               type: object
               required:
+                - identity_id
+              properties:
+                identity_id:
+                  type: string
+                  description: Core identity ID
+                username:
+                  type: string
+                  description: Username for this peer
+                network_id:
+                  type: string
+                  description: Optional network ID (can be empty initially)
+      responses:
+        '200':
+          description: Peer created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ids
+                properties:
+                  ids:
+                    type: object
+                    properties:
+                      peer:
+                        type: string
+                        description: The ID of the created peer
+                  data:
+                    type: object
+                    description: Additional response data
+
+  /networks:
+    post:
+      summary: Create a new network
+      operationId: network.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - peer_id
                 - name
               properties:
+                peer_id:
+                  type: string
+                  description: Peer ID of the creator
                 name:
                   type: string
                   description: Name of the network
                 description:
                   type: string
                   description: Optional description
-                creator_name:
-                  type: string
-                  description: Name for the creator identity
       responses:
         '200':
           description: Network created successfully
@@ -75,7 +118,7 @@ paths:
 
     get:
       summary: List all networks
-      operationId: get_networks
+      operationId: network.get
       responses:
         '200':
           description: List of networks
@@ -104,7 +147,7 @@ paths:
   /identities:
     post:
       summary: Create a new identity
-      operationId: create_identity
+      operationId: core.identity_create
       requestBody:
         required: true
         content:
@@ -140,7 +183,7 @@ paths:
 
     get:
       summary: List all identities
-      operationId: get_identities
+      operationId: core.identity_list
       responses:
         '200':
           description: List of identities
@@ -165,7 +208,7 @@ paths:
   /users/join:
     post:
       summary: Join a network as a user using an invite link
-      operationId: join_as_user
+      operationId: user.join
       requestBody:
         required: true
         content:
@@ -197,10 +240,11 @@ paths:
                   network_id:
                     type: string
 
+
   /users:
     post:
       summary: Create a user event for an identity
-      operationId: create_user
+      operationId: user.create
       requestBody:
         required: true
         content:
@@ -238,7 +282,7 @@ paths:
 
     get:
       summary: List users visible to an identity
-      operationId: get_users
+      operationId: user.get
       parameters:
         - name: identity_id
           in: query
@@ -280,7 +324,7 @@ paths:
   /groups:
     post:
       summary: Create a new group
-      operationId: create_group
+      operationId: group.create
       requestBody:
         required: true
         content:
@@ -336,7 +380,7 @@ paths:
 
     get:
       summary: List groups visible to an identity
-      operationId: get_groups
+      operationId: group.get
       parameters:
         - name: identity_id
           in: query
@@ -376,7 +420,7 @@ paths:
   /channels:
     post:
       summary: Create a new channel in a group
-      operationId: create_channel
+      operationId: channel.create
       requestBody:
         required: true
         content:
@@ -433,7 +477,7 @@ paths:
 
     get:
       summary: List channels visible to an identity
-      operationId: get_channels
+      operationId: channel.get
       parameters:
         - name: identity_id
           in: query
@@ -471,7 +515,7 @@ paths:
   /messages:
     post:
       summary: Create a new message
-      operationId: create_message
+      operationId: message.create
       requestBody:
         required: true
         content:
@@ -528,7 +572,7 @@ paths:
 
     get:
       summary: List messages visible to an identity
-      operationId: get_messages
+      operationId: message.get
       parameters:
         - name: identity_id
           in: query
@@ -576,7 +620,7 @@ paths:
   /invites:
     post:
       summary: Create an invite to join a network
-      operationId: create_invite
+      operationId: invite.create
       requestBody:
         required: true
         content:
@@ -631,7 +675,7 @@ paths:
   /groups/members:
     post:
       summary: Create a group member
-      operationId: create_member
+      operationId: member.create
       requestBody:
         required: true
         content:
@@ -672,7 +716,7 @@ paths:
   /keys:
     post:
       summary: Create a new encryption key for a group
-      operationId: create_key
+      operationId: key.create
       requestBody:
         required: true
         content:
@@ -712,7 +756,7 @@ paths:
 
     get:
       summary: List all keys
-      operationId: list_keys
+      operationId: key.list
       parameters:
         - name: group_id
           in: query
@@ -745,7 +789,7 @@ paths:
   /transit-keys:
     post:
       summary: Create a new transit encryption key
-      operationId: create_transit_secret
+      operationId: transit_secret.create
       requestBody:
         required: true
         content:
@@ -778,7 +822,7 @@ paths:
 
     get:
       summary: List all transit keys
-      operationId: list_transit_keys
+      operationId: transit_secret.list
       parameters:
         - name: network_id
           in: query
@@ -811,7 +855,7 @@ paths:
   /system/database:
     get:
       summary: Get current database state
-      operationId: dump_database
+      operationId: system.dump_database
       description: Returns all tables and their contents for debugging
       responses:
         '200':
@@ -828,7 +872,7 @@ paths:
   /system/logs:
     get:
       summary: Get recent processor logs
-      operationId: get_processor_logs
+      operationId: system.logs
       parameters:
         - name: limit
           in: query

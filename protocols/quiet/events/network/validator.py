@@ -28,8 +28,10 @@ def validate(envelope: dict[str, Any]) -> bool:
     if not event.get('name', '').strip():
         return False
     
-    # Check creator matches peer_id (the signer)
-    if event.get('creator_id') != envelope.get('peer_id'):
+    # Check creator matches identity_id (the signer) for self-created
+    # or peer_id for received events
+    signer_id = envelope.get('identity_id') or envelope.get('peer_id')
+    if event.get('creator_id') != signer_id:
         return False
     
     # For now, don't check duplicates - that would require db access

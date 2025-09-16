@@ -37,10 +37,10 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         SELECT u.*, i.name
         FROM users u
-        LEFT JOIN identities i ON u.peer_id = i.identity_id
+        LEFT JOIN core_identities i ON u.peer_id = i.identity_id
         WHERE u.network_id = ?
         AND EXISTS (
-            SELECT 1 FROM identities i2
+            SELECT 1 FROM core_identities i2
             WHERE i2.identity_id = ?
         )
         ORDER BY u.joined_at DESC
@@ -73,7 +73,7 @@ def get_user(db: ReadOnlyConnection, params: Dict[str, Any]) -> Optional[Dict[st
         """
         SELECT u.*, i.name
         FROM users u
-        LEFT JOIN identities i ON u.peer_id = i.identity_id
+        LEFT JOIN core_identities i ON u.peer_id = i.identity_id
         WHERE u.user_id = ?
         """,
         (user_id,)
@@ -102,7 +102,7 @@ def get_user_by_peer_id(db: ReadOnlyConnection, params: Dict[str, Any]) -> Optio
         """
         SELECT u.*, i.name
         FROM users u
-        LEFT JOIN identities i ON u.peer_id = i.identity_id
+        LEFT JOIN core_identities i ON u.peer_id = i.identity_id
         WHERE u.peer_id = ? AND u.network_id = ?
         ORDER BY u.joined_at DESC
         LIMIT 1

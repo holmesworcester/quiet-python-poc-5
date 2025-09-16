@@ -20,3 +20,13 @@ CREATE TABLE IF NOT EXISTS blocked_event_deps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_blocked_event_deps_event ON blocked_event_deps(event_id);
+
+-- Table to track completed events for placeholder resolution
+CREATE TABLE IF NOT EXISTS completed_events (
+    event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_completed_events_request ON completed_events(request_id, event_type, created_at);
