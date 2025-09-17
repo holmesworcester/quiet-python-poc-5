@@ -223,8 +223,23 @@ def validate_event_data(event_type: str, event_data: dict) -> bool:
         return False
     
     expected_type = EVENT_TYPE_REGISTRY[event_type]
-    required_fields = {k for k, v in expected_type.__annotations__.items() 
+    required_fields = {k for k, v in expected_type.__annotations__.items()
                       if not (hasattr(v, '__origin__') and v.__origin__ is Optional)}
+
+    # Treat self-id fields as optional. Event IDs are derived by the pipeline
+    # and should not be present in plaintext at command time.
+    OPTIONAL_SELF_ID_FIELDS: dict[str, set[str]] = {
+        'network': {'network_id'},
+        'group': {'group_id'},
+        'channel': {'channel_id'},
+        'message': {'message_id'},
+        'user': {'user_id'},
+        'member': {'add_id'},
+        'key': {'key_id'},
+        'transit_secret': {'transit_key_id'},
+        'invite': {'invite_id'},
+    }
+    required_fields -= OPTIONAL_SELF_ID_FIELDS.get(event_type, set())
     
     # Check all required fields are present
     for field in required_fields:

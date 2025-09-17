@@ -572,7 +572,9 @@ Each event type is a self-contained module with these components:
 ```
 protocols/quiet/
 ├── __init__.py
-├── commands.py           # Command registry and loader
+├── api.py               # Protocol API exposure (flows/queries)
+├── jobs.py              # Protocol-level jobs (flow ops)
+├── reflectors.py        # Protocol-level reflector mappings
 ├── openapi.yaml         # API specification
 ├── handlers/            # Pipeline handlers
 │   ├── __init__.py
@@ -585,19 +587,18 @@ protocols/quiet/
 ├── events/              # Event type modules  
 │   ├── message/
 │   │   ├── __init__.py
-│   │   ├── commands.py      # create_message() function
+│   │   ├── flows.py         # message.create flow
 │   │   ├── projector.py     # project() function
 │   │   ├── queries.py       # get_messages() etc.
 │   │   ├── validator.py     # validate() function
-│   │   ├── remover.py      # should_remove() function
-│   │   └── message.schema.sql
+│   │   └── message.sql
 │   ├── identity/
 │   │   ├── __init__.py
-│   │   ├── commands.py
+│   │   ├── flows.py         # identity.create, identity.create_as_user
 │   │   ├── projector.py
 │   │   ├── queries.py
 │   │   ├── validator.py
-│   │   └── identity.schema.sql
+│   │   └── identity.sql
 │   └── (other event types...)
 └── tests/
     ├── handlers/
@@ -612,11 +613,11 @@ protocols/quiet/
 
 ## Components
 
-1. **Command** (creator): Pure function that takes params and returns envelopes
-   - Input: User parameters (e.g., `{"message": "Hello", "channel_id": "123"}`)
-   - Output: Envelope with unsigned event and dependency declarations
-   - Never accesses database or performs crypto operations
-   - Declares dependencies needed for signing/encryption in `deps` array
+1. **Flow** (operation): Orchestrates emit + query and returns a shaped result
+   - Input: Params dict via API
+   - Uses `FlowCtx.emit_event(...)` to emit events through pipeline
+   - May perform read-only queries for convenience data
+   - Returns `{ 'ids': {...}, 'data': {...} }`
 
 2. **Validator**: Pure function that validates event structure
    - Input: Full envelope data and all (and only!) valid deps complete `deps` array (validators often need depency events)
@@ -647,78 +648,38 @@ protocols/quiet/
    - Determines if an event should be removed based on other removals
    - Example: Remove messages when their channel is removed
 
-# API and Commands
+# API and Commands (Flows)
 
 ## API Design
 
-The API exposes high-level operations that map to commands:
-- POST `/messages` → `create_message` command
-- POST `/groups` → `create_group` command  
-- POST `/invites` → `create_invite` command
-- POST `/users/join` → `join_network` command
+The API exposes high-level operations that map to flows:
+- POST `/messages` → `message.create`
+- POST `/groups` → `group.create`  
+- POST `/invites` → `invite.create`
+- POST `/users/join` → `user.join_as_user`
 
 API requests include:
 - User intent parameters (e.g., message content, channel ID)
 - Identity context (which identity is performing the action)
 - Never include private keys or low-level crypto details
 
-## Command Interface
+## Operation Interface
 
-Commands accept parameters that mirror API requests and return envelopes for pipeline processing.
+Operations accept parameters that mirror API requests and orchestrate event creation. They return a standard response shape:
+- `ids`: Mapping of event_type to event_id for emitted events (one per type when applicable)
+- `data`: Optional query-shaped payload after events are stored
 
-### Command Response System
+Flows emit via a core helper and never write to the DB directly; the pipeline performs dependency resolution, signing, validation, encryption, projection, and storage.
 
-Commands cannot predict the final event IDs because IDs are generated from the hash of signed events with dependencies. The pipeline processes commands through multiple handlers (resolve_deps, signature, event_store) before generating the final ID.
+### Multi-Event Flows (Sequential Emission)
 
-After pipeline processing, the API returns a standard response shape containing:
-- `ids`: Mapping of event_type to event_id for events that were stored (only returns IDs for event types with exactly one event)
-- `data`: Optional query results that can be populated after the events are stored
+For multi-step operations (e.g., `join_as_user` creating identity, peer, and user), flows emit events sequentially and pass real IDs between steps. There is no placeholder mechanism.
 
-This design allows commands to remain pure functions that only create envelope structures, while the pipeline handles the complex processing of dependencies, signatures, and storage.
+- Step 1 emits identity and receives `identity_id`.
+- Step 2 emits peer using `identity_id` and receives `peer_id`.
+- Step 3 emits user using `peer_id` and invite context, and receives `user_id`.
 
-### Multi-Event Commands and Placeholder Resolution
-
-When commands need to create multiple related events (e.g., `join_as_user` creates identity, peer, and user events), they use placeholders to handle cross-references between events that don't have IDs yet.
-
-**Placeholder Format**: `@generated:type:index` (e.g., `@generated:peer:0` refers to the first peer event)
-
-**Example**:
-```python
-# In join_as_user command:
-user_event = {
-    'type': 'user',
-    'peer_id': '@generated:peer:0',  # Placeholder for peer event's ID
-    'name': 'Alice',
-    ...
-}
-```
-
-**Pipeline Processing**:
-1. Separates events with placeholders from those without
-2. Processes non-placeholder events first (they get their IDs)
-3. Resolves placeholders by replacing them with actual IDs
-4. Processes placeholder events with resolved references
-
-This enables complex multi-event operations while keeping commands as pure functions.
-
-Commands accept parameters that mirror API requests:
-```python
-# API-friendly parameters
-params = {
-    "content": "Hello world",
-    "channel_id": "channel_123", 
-    "identity_id": "identity_abc"  # Which identity is sending
-}
-
-# Command creates envelope with dependencies
-envelope = create_message(params, db)
-# Returns: {
-#     "event_plaintext": {"type": "message", "content": "Hello world", ...},
-#     "event_type": "message",
-#     "peer_id": "identity_abc",
-#     "deps": ["identity:identity_abc"]  # Declares need for identity's key
-# }
-```
+Flows return a standard `{ ids, data }` shape; the pipeline derives and stores event IDs.
 
 The framework:
 1. Routes API calls to appropriate commands
@@ -743,46 +704,7 @@ We have a protocol-defined event_store handler that stores `event_id`, `cipherte
 
 # Testing
 
-## Command Testing Requirements
-
-All command tests must verify two aspects:
-
-### 1. Envelope Creation (Pure Function Test)
-Test that the command creates correct envelope structure:
-```python
-def test_envelope_creation(self):
-    # Call command directly as pure function
-    envelopes = create_message(params)
-
-    # Verify envelope structure
-    assert envelope['event_type'] == 'message'
-    assert envelope['self_created'] == True
-    assert 'deps' in envelope
-    # Check placeholders if multi-event command
-    assert envelope['event_plaintext']['peer_id'] == '@generated:peer:0'
-```
-
-### 2. API Response (Pipeline Integration Test)
-Test that the pipeline processes the command and returns correct IDs:
-```python
-def test_api_response(self):
-    # Run through pipeline
-    runner = PipelineRunner(db_path=':memory:')
-    result = runner.run('protocols/quiet', commands=[{
-        'name': 'create_message',
-        'params': params
-    }])
-
-    # Verify IDs are returned (proves pipeline worked)
-    assert 'message' in result
-    assert len(result['message']) == 32  # Blake2b hash
-```
-
-The API response test verifies:
-- Events were validated and stored
-- Placeholders were resolved (for multi-event commands)
-- Dependencies were satisfied
-- The entire pipeline executed successfully
+Prefer scenario tests that use the API (`APIClient`) and assert on projected state via queries. For unit tests, test handlers and projectors with controlled envelopes. There is no placeholder mechanism; flows emit sequentially and provide real IDs.
 
 ## Pure Function Testing (No Database Access)
 
@@ -894,7 +816,7 @@ We use a **peer-first architecture** where peer events are created before networ
 
 2. **Network Creation**: Networks require a peer_id as creator, establishing clear ownership and ensuring the creator has a verifiable identity in the protocol.
 
-3. **Frontend Responsibility**: The frontend manages the mapping between core identities and their peer events, passing peer_id directly to all commands.
+3. **Frontend Responsibility**: The frontend manages the mapping between core identities and their peer events, passing peer_id directly to all flows.
 
 This approach avoids:
 - Complex database lookups in commands to find the right peer for an identity+network combination

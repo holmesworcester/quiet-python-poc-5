@@ -25,6 +25,17 @@ class ReflectHandler(Handler):
 
         reflectors: Dict[str, Callable[[Dict[str, Any], sqlite3.Connection, int], tuple[bool, List[Dict[str, Any]]]]] = {}
 
+        # First, try protocol-level reflectors module (preferred)
+        try:
+            import importlib
+            proto_mod = importlib.import_module('protocols.quiet.reflectors')
+            mapping = getattr(proto_mod, 'REFLECTORS', {})
+            if isinstance(mapping, dict):
+                reflectors.update(mapping)
+        except Exception:
+            pass
+
+        # Then, fallback to scanning event directories for legacy reflectors
         # Find the events directory
         events_dir = Path(__file__).parent.parent / 'events'
 

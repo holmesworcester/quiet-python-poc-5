@@ -81,9 +81,33 @@ def unseal(ciphertext: bytes, private_key: bytes, public_key: bytes) -> bytes:
 
 
 def kdf(input_material: bytes, salt: bytes, size: int = 32) -> bytes:
-    """Key derivation function using BLAKE2b."""
+    """Key derivation function using BLAKE2b (simple concat)."""
     return nacl.hash.blake2b(
-        input_material + salt, 
-        digest_size=size, 
-        encoder=nacl.encoding.RawEncoder
+        input_material + salt,
+        digest_size=size,
+        encoder=nacl.encoding.RawEncoder,
     )
+
+
+def derive_hex_kdf(input_str: str, *, salt_name: str = "quiet_kdf_salt_v1", size: int = 32) -> str:
+    """
+    Derive a deterministic hex key from a UTF-8 string using BLAKE2b(KDF).
+
+    Args:
+        input_str: Secret input as string
+        salt_name: Salt domain label (SHA-256 to 16 bytes)
+        size: Output length in bytes (default 32)
+
+    Returns:
+        Hex-encoded derived key string
+    """
+    salt = hashlib.sha256(salt_name.encode('utf-8')).digest()[:16]
+    return kdf(input_str.encode('utf-8'), salt=salt, size=size).hex()
+
+
+def derive_invite_pubkey(invite_secret: str) -> str:
+    """
+    Derive the invite public key from an invite secret using a fixed salt label.
+    Compatible with the prior invite KDF usage.
+    """
+    return derive_hex_kdf(invite_secret, salt_name="quiet_invite_kdf_v1", size=32)

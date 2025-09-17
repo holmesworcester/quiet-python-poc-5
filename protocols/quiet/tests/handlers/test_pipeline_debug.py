@@ -9,7 +9,7 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from protocols.quiet.events.network.commands import create_network
+from protocols.quiet.events.network.create import create_network
 from core.pipeline import PipelineRunner
 from core.handlers import registry
 import tempfile

@@ -86,7 +86,6 @@ def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, Any]:
 
 def sign_event(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, Any]:
     """Sign a self-created event using the identity associated with the peer."""
-    from core.identity import sign_with_identity
 
     event_plaintext = envelope.get('event_plaintext', {})
     event_type = envelope.get('event_type')
@@ -109,11 +108,7 @@ def sign_event(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, An
             envelope['sig_failed'] = True
             return envelope
 
-        # Handle placeholder peer_ids (for events created in batches)
-        if peer_id.startswith('@generated:'):
-            # Can't sign yet - will be signed later when peer_id is resolved
-            envelope['sig_deferred'] = True
-            return envelope
+        # Placeholder peer_ids no longer supported (flows emit sequentially)
 
         # Look up peer's public key from database
         cursor = db.execute("""
@@ -136,9 +131,22 @@ def sign_event(envelope: dict[str, Any], db: sqlite3.Connection) -> dict[str, An
     event_copy.pop('signature', None)
     canonical = canonicalize_event(event_copy)
 
+    # Sign using protocol identities (private key stored locally)
     try:
-        signature = sign_with_identity(public_key_hex, canonical, db)
-    except ValueError as e:
+        cur = db.execute(
+            """
+            SELECT private_key FROM identities
+            WHERE public_key = ?
+            """,
+            (public_key_hex,),
+        )
+        row = cur.fetchone()
+        if not row or not row['private_key']:
+            raise ValueError("Private key not found for signer")
+        from core.crypto import sign
+        private_key_bytes = row['private_key'] if isinstance(row['private_key'], (bytes, bytearray)) else bytes.fromhex(row['private_key'])
+        signature = sign(canonical, private_key_bytes).hex()
+    except Exception as e:
         envelope['error'] = str(e)
         envelope['sig_failed'] = True
         return envelope

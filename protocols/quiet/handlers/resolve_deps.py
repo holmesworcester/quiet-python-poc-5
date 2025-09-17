@@ -81,6 +81,10 @@ def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, 
                     deps.append(f"invite:{pt['invite_pubkey']}")
                 if envelope.get('peer_id'):
                     deps.append(f"peer:{envelope['peer_id']}")
+            elif etype == 'peer':
+                # New: peer depends on identity for signing
+                if pt.get('identity_id'):
+                    deps.append(f"identity:{pt['identity_id']}")
         if deps:
             envelope['deps'] = deps
             envelope['deps_included_and_valid'] = False
@@ -98,18 +102,8 @@ def handler(envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, 
         # This is a newly validated event - check for blocked events
         event_id = envelope.get('event_id')
         if event_id:
-            # Track this completed event for placeholder resolution
-            track_completed_event(envelope, db)
-
             # Check for events waiting on this one
             unblocked = unblock_waiting_events(event_id, db)
-
-            # Also check for events waiting on placeholders that can now be resolved
-            request_id = envelope.get('request_id')
-            if request_id:
-                placeholder_unblocked = unblock_placeholder_events(request_id, db)
-                results.extend(placeholder_unblocked)
-
             results.extend(unblocked)
         # Do NOT re-emit the validated event itself
 
@@ -143,44 +137,10 @@ def resolve_dependencies(envelope: dict[str, Any], db: sqlite3.Connection) -> Op
     resolved_deps = {}
     missing_deps = []
 
-    # Check for placeholders in dependencies or peer_id
-    has_placeholders = (any(dep.startswith('@generated:') for dep in deps_needed) or
-                       envelope.get('peer_id', '').startswith('@generated:'))
+    # Note: placeholder resolution removed (flows emit sequentially and pass real IDs)
 
-    if has_placeholders:
-        # Try to resolve placeholders from completed events in the same request
-        request_id = envelope.get('request_id')
-        if request_id:
-            deps_needed = resolve_placeholders_in_list(deps_needed, request_id, db)
-            envelope['deps'] = deps_needed  # Update the deps list with resolved placeholders
-
-            # Also resolve placeholders in event_plaintext if needed
-            if 'event_plaintext' in envelope:
-                envelope['event_plaintext'] = resolve_placeholders_in_dict(
-                    envelope['event_plaintext'], request_id, db
-                )
-
-            # Also resolve placeholder in peer_id if it's a placeholder
-            peer_id = envelope.get('peer_id', '')
-            if peer_id.startswith('@generated:'):
-                resolved_peer_id = resolve_single_placeholder(peer_id, request_id, db)
-                if resolved_peer_id:
-                    envelope['peer_id'] = resolved_peer_id
-                    # Also update in event_plaintext
-                    if 'event_plaintext' in envelope:
-                        envelope['event_plaintext']['peer_id'] = resolved_peer_id
-                else:
-                    # Can't resolve yet, mark as having missing dependencies
-                    print(f"[resolve_deps] Could not resolve {peer_id} for request {request_id}")
-                    missing_deps.append(peer_id)
-
-    # Continue resolving other dependencies
+    # Resolve each dependency normally (no placeholder semantics)
     for dep_ref in deps_needed:
-        # Skip unresolved placeholders
-        if dep_ref.startswith('@generated:'):
-            missing_deps.append(dep_ref)
-            continue
-
         dep_type, dep_id = parse_dep_ref(dep_ref)
         dep_data = fetch_dependency(dep_id, dep_type, db)
 
@@ -310,151 +270,7 @@ def are_all_deps_satisfied(event_id: str, db: sqlite3.Connection) -> bool:
     return True
 
 
-def track_completed_event(envelope: dict[str, Any], db: sqlite3.Connection) -> None:
-    """Track a completed event for placeholder resolution."""
-    event_id = envelope.get('event_id')
-    event_type = envelope.get('event_type')
-    request_id = envelope.get('request_id')
-
-    if not event_id or not event_type or not request_id:
-        return
-
-    # Store in a tracking table for placeholder resolution
-    try:
-        db.execute("""
-            INSERT OR REPLACE INTO completed_events
-            (event_id, event_type, request_id, created_at)
-            VALUES (?, ?, ?, ?)
-        """, (event_id, event_type, request_id, int(time.time() * 1000)))
-    except:
-        pass  # Table might not exist yet
-
-
-def unblock_placeholder_events(request_id: str, db: sqlite3.Connection) -> List[dict[str, Any]]:
-    """Check for blocked events with placeholders that can now be resolved."""
-    unblocked = []
-
-    # Find blocked events with placeholder dependencies
-    cursor = db.execute("""
-        SELECT event_id, envelope_json
-        FROM blocked_events
-        WHERE missing_deps LIKE '%@generated:%'
-    """)
-
-    for row in cursor:
-        event_id, envelope_json = row
-        try:
-            envelope = json.loads(envelope_json)
-
-            # Only process events from the same request
-            if envelope.get('request_id') != request_id:
-                continue
-
-            # Try to resolve placeholders
-            original_deps = envelope.get('deps', [])
-            resolved_deps = resolve_placeholders_in_list(original_deps, request_id, db)
-
-            # Check if any placeholders were resolved
-            if resolved_deps != original_deps:
-                envelope['deps'] = resolved_deps
-
-                # Also resolve placeholders in event data
-                if 'event_plaintext' in envelope:
-                    envelope['event_plaintext'] = resolve_placeholders_in_dict(
-                        envelope['event_plaintext'], request_id, db
-                    )
-
-                # Resolve peer_id placeholder if needed
-                peer_id = envelope.get('peer_id', '')
-                if peer_id.startswith('@generated:'):
-                    resolved_peer_id = resolve_single_placeholder(peer_id, request_id, db)
-                    if resolved_peer_id:
-                        envelope['peer_id'] = resolved_peer_id
-
-                # Check if all placeholders are now resolved
-                if not any(dep.startswith('@generated:') for dep in envelope.get('deps', [])):
-                    # Remove from blocked events
-                    db.execute("DELETE FROM blocked_events WHERE event_id = ?", (event_id,))
-                    db.execute("DELETE FROM blocked_event_deps WHERE event_id = ?", (event_id,))
-
-                    # Mark for re-processing
-                    envelope['unblocked'] = True
-                    envelope['retry_count'] = envelope.get('retry_count', 0) + 1
-                    envelope.pop('missing_deps', None)
-                    envelope.pop('missing_deps_list', None)
-                    envelope['deps_included_and_valid'] = False
-
-                    unblocked.append(envelope)
-                else:
-                    # Update blocked event with partially resolved placeholders
-                    db.execute("""
-                        UPDATE blocked_events
-                        SET envelope_json = ?
-                        WHERE event_id = ?
-                    """, (json.dumps(envelope), event_id))
-
-        except Exception as e:
-            continue
-
-    return unblocked
-
-
-def resolve_single_placeholder(placeholder: str, request_id: str, db: sqlite3.Connection) -> Optional[str]:
-    """Resolve a single placeholder to an actual event ID."""
-    if not placeholder.startswith('@generated:'):
-        return placeholder
-
-    # Parse placeholder format: @generated:type:index
-    parts = placeholder.split(':')
-    if len(parts) != 3:
-        return None
-
-    event_type = parts[1]
-    index = int(parts[2])
-
-    # Look for validated events of this type in the same request
-    # These are tracked when events validate during pipeline processing
-    cursor = db.execute("""
-        SELECT event_id FROM completed_events
-        WHERE event_type = ?
-        AND request_id = ?
-        ORDER BY created_at
-        LIMIT 1 OFFSET ?
-    """, (event_type, request_id, index))
-
-    row = cursor.fetchone()
-    return row[0] if row else None
-
-
-def resolve_placeholders_in_list(items: List[str], request_id: str, db: sqlite3.Connection) -> List[str]:
-    """Resolve placeholders in a list of strings."""
-    resolved = []
-    for item in items:
-        if item.startswith('@generated:'):
-            resolved_id = resolve_single_placeholder(item, request_id, db)
-            resolved.append(resolved_id if resolved_id else item)
-        else:
-            resolved.append(item)
-    return resolved
-
-
-def resolve_placeholders_in_dict(data: Dict[str, Any], request_id: str, db: sqlite3.Connection) -> Dict[str, Any]:
-    """Recursively resolve placeholders in a dictionary."""
-    result: Dict[str, Any] = {}
-    for key, value in data.items():
-        if isinstance(value, str) and value.startswith('@generated:'):
-            resolved = resolve_single_placeholder(value, request_id, db)
-            result[key] = resolved if resolved else value
-        elif isinstance(value, dict):
-            result[key] = resolve_placeholders_in_dict(value, request_id, db)
-        elif isinstance(value, list):
-            result[key] = [
-                resolve_single_placeholder(v, request_id, db) if isinstance(v, str) and v.startswith('@generated:') else v
-                for v in value
-            ]
-        else:
-            result[key] = value
-    return result
+    # Placeholder tracking/resolution removed (no longer needed)
 
 
 def parse_dep_ref(dep_ref: str) -> Tuple[str, str]:
@@ -470,8 +286,31 @@ def fetch_dependency(dep_id: str, dep_type: str, db: sqlite3.Connection) -> Opti
     """Fetch a dependency - either a validated event or local secret."""
     
     if dep_type == 'identity':
-        # Identity is now a core feature, not stored as events
-        # This shouldn't be called anymore since we removed identity dependencies
+        # Protocol-local identity (private key storage)
+        cur = db.execute(
+            """
+            SELECT identity_id, name, public_key, private_key, created_at
+            FROM identities
+            WHERE identity_id = ?
+            """,
+            (dep_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            event_plaintext = {
+                'type': 'identity',
+                'identity_id': row['identity_id'],
+                'name': row['name'],
+                'public_key': row['public_key'] if isinstance(row['public_key'], str) else row['public_key'].hex(),
+                'private_key': row['private_key'].hex() if isinstance(row['private_key'], (bytes, bytearray)) else row['private_key'],
+                'created_at': row['created_at'],
+            }
+            return {
+                'event_plaintext': event_plaintext,
+                'event_type': 'identity',
+                'event_id': row['identity_id'],
+                'validated': True,
+            }
         return None
 
     elif dep_type == 'transit_key':

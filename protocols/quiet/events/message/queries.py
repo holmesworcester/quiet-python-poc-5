@@ -43,11 +43,8 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         FROM messages m
         LEFT JOIN users u ON u.peer_id = m.author_id
         LEFT JOIN peers p ON p.peer_id = m.author_id
-        LEFT JOIN core_identities i ON i.identity_id = p.identity_id
-        WHERE EXISTS (
-            SELECT 1 FROM core_identities i2
-            WHERE i2.identity_id = ?
-        )
+        LEFT JOIN identities i ON i.identity_id = p.identity_id
+        WHERE EXISTS (SELECT 1 FROM identities i2 WHERE i2.identity_id = ?)
     """
     query_params = [identity_id]
 

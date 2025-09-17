@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from .commands import command_registry
 from .db import get_connection, init_database
 from .handlers import registry
 
@@ -73,33 +72,7 @@ class PipelineRunner:
         # Track stored events for return value
         stored_events = {}
 
-        # Process commands if provided
-        if commands:
-            self.log(f"Executing {len(commands)} commands")
-            command_envelopes = []
-            for i, cmd in enumerate(commands):
-                cmd_name = cmd.get('name')
-                cmd_params = cmd.get('params', {})
-                request_id = f"cmd_{i}"  # Unique ID for this command request
-
-                try:
-                    if cmd_name is not None:
-                        envelopes = command_registry.execute(cmd_name, cmd_params, db)
-                    else:
-                        envelopes = []
-
-                    # Add request_id to all envelopes from this command
-                    for envelope in envelopes:
-                        envelope['request_id'] = request_id
-
-                    command_envelopes.extend(envelopes)
-                    self.log(f"Command '{cmd_name}' emitted {len(envelopes)} envelopes")
-                except Exception as e:
-                    self.log(f"Error executing command '{cmd_name}': {e}")
-
-            if command_envelopes:
-                stored = self._process_envelopes(command_envelopes, db)
-                stored_events.update(stored)
+        # Deprecated: 'commands' parameter no longer supported; flows emit directly
 
         # Process input envelopes if provided
         if input_envelopes:
@@ -107,8 +80,7 @@ class PipelineRunner:
             stored = self._process_envelopes(input_envelopes, db)
             stored_events.update(stored)
 
-        # Check for any envelopes in outgoing_queue
-        # self._process_outgoing_queue(db)  # Disabled - not part of current design
+        # Check for any envelopes in outgoing_queue (not used by default)
 
         # Summary
         elapsed = time.time() - self.start_time
@@ -129,16 +101,7 @@ class PipelineRunner:
         protocol_name = Path(protocol_dir).name
         self.log(f"Loading handlers for protocol: {protocol_name}")
         
-        # Load commands if available
-        try:
-            commands_module = importlib.import_module(f"protocols.{protocol_name}.commands")
-            if hasattr(commands_module, 'register_commands'):
-                commands_module.register_commands()
-                self.log(f"Loaded commands from protocols.{protocol_name}.commands")
-        except ImportError:
-            pass
-        except Exception as e:
-            self.log(f"Failed to load commands: {e}")
+        # Commands registry removed; flows register via @flow_op on import
         
         handlers_dir = Path(protocol_dir) / "handlers"
         if not handlers_dir.exists():
@@ -202,32 +165,11 @@ class PipelineRunner:
         # Track all envelopes we process (for tracking stored events)
         all_processed = []
 
-        # Track generated event IDs for placeholder resolution
-        generated_ids: Dict[str, List[str]] = {}  # event_type -> [event_ids]
+        # Track generated event IDs for reference (one per type)
+        generated_ids: Dict[str, List[str]] = {}
 
-        # Separate events with placeholders from those without
-        def has_placeholders(envelope: dict) -> bool:
-            """Check if envelope has any @generated: placeholders."""
-            def check_value(value: Any) -> bool:
-                if isinstance(value, str) and value.startswith('@generated:'):
-                    return True
-                elif isinstance(value, dict):
-                    return any(check_value(v) for v in value.values())
-                elif isinstance(value, list):
-                    return any(check_value(item) for item in value)
-                return False
-
-            if 'event_plaintext' in envelope and check_value(envelope['event_plaintext']):
-                return True
-            if 'deps' in envelope and check_value(envelope['deps']):
-                return True
-            return False
-
-        # Process events without placeholders first
-        no_placeholder_queue = [env for env in processed_envelopes if not has_placeholders(env)]
-        placeholder_queue = [env for env in processed_envelopes if has_placeholders(env)]
-
-        queue = no_placeholder_queue
+        # Process all events sequentially (no placeholder semantics)
+        queue = processed_envelopes
         iterations = 0
 
         # Max times a single envelope can be processed
@@ -241,7 +183,7 @@ class PipelineRunner:
             total_envelopes_processed += len(queue)
 
             if self.verbose:
-                self.log(f"--- Iteration {iterations} with {len(queue)} envelopes (no placeholders) ---")
+                self.log(f"--- Iteration {iterations} with {len(queue)} envelopes ---")
 
             next_queue = []
             for envelope in queue:
@@ -303,81 +245,33 @@ class PipelineRunner:
 
             queue = next_queue
 
-        # Now process events with placeholders
-        if placeholder_queue:
-            if self.verbose:
-                self.log(f"--- Processing {len(placeholder_queue)} envelopes with placeholders ---")
-
-            queue = placeholder_queue
-            placeholder_iterations = 0
-
-            while queue:
-                placeholder_iterations += 1
-                total_envelopes_processed += len(queue)
-
-                if self.verbose:
-                    self.log(f"--- Placeholder iteration {placeholder_iterations} with {len(queue)} envelopes ---")
-
-                next_queue = []
-                for envelope in queue:
-                    # Resolve placeholders in this envelope before processing
-                    self._resolve_placeholders(envelope, generated_ids)
-
-                    # Use a simple accumulator field to track processing count
-                    process_count = envelope.get('_process_count', 0) + 1
-                    envelope['_process_count'] = process_count
-
-                    # Check if this envelope has been processed too many times
-                    if process_count > max_envelope_processes:
-                        # For debugging, generate a simple ID based on event type and a hash of the plaintext
-                        debug_id = f"{envelope.get('event_type', 'unknown')}_{envelope.get('event_id', 'no_id')}"
-                        self.log(f"ERROR: Envelope loop detected! {debug_id} processed {process_count} times")
-                        self.log(f"ERROR: Dropping envelope of type {envelope.get('event_type', 'unknown')}")
-                        continue  # Skip this envelope
-
-                    self.processed_count += 1
-
-                    # Process through all matching handlers
-                    emitted = registry.process_envelope(envelope, db)
-
-                    # Track generated event_id for placeholder resolution
-                    if 'event_id' in envelope:
-                        event_type = envelope.get('event_type', '')
-                        if event_type:
-                            if event_type not in generated_ids:
-                                generated_ids[event_type] = []
-                            generated_ids[event_type].append(envelope['event_id'])
-
-                    # Track the processed envelope
-                    all_processed.append(envelope)
-
-                    if self.verbose and emitted:
-                        for handler in registry._handlers:
-                            if handler.filter(envelope):
-                                self.log_envelope("CONSUMED", handler.name, envelope)
-                                for e in emitted:
-                                    self.log_envelope("EMITTED", handler.name, e)
-
-                    # Add emitted envelopes to next queue
-                    next_queue.extend(emitted)
-                    self.emitted_count += len(emitted)
-
-                queue = next_queue
-                iterations += 1
+        # No placeholder pass
 
         # Track stored events (only return one per type)
         # Use a dict to track unique events by event_id to avoid counting duplicates
         stored_events_by_id = {}
 
         for envelope in all_processed:
-            # Check if this envelope was stored and has a request_id
-            if envelope.get('stored') and 'request_id' in envelope:
-                event_type = envelope.get('event_type')
-                event_id = envelope.get('event_id')
+            # Consider envelopes tied to this request
+            if 'request_id' not in envelope:
+                continue
 
-                if event_type and event_id:
-                    # Track by event_id to avoid duplicates
-                    stored_events_by_id[event_id] = event_type
+            event_type = envelope.get('event_type')
+            event_id = envelope.get('event_id')
+
+            if not event_type or not event_id:
+                continue
+
+            # Treat as "stored" if:
+            # - event_store stored it (stored==True), or
+            # - it's a local-only identity projected into identities (projected==True and event_type=='identity')
+            is_effectively_stored = (
+                envelope.get('stored') is True or
+                (event_type == 'identity' and envelope.get('projected') is True)
+            )
+
+            if is_effectively_stored:
+                stored_events_by_id[event_id] = event_type
 
         # Count unique events per type
         event_counts: Dict[str, int] = {}
@@ -397,69 +291,7 @@ class PipelineRunner:
 
         return stored_ids
 
-    def _resolve_placeholders(self, envelope: dict[str, Any], generated_ids: Dict[str, List[str]]) -> None:
-        """Resolve @generated: placeholders in envelope.
-
-        Placeholders have format: @generated:type:index
-        e.g., @generated:peer:0 means the first peer event's ID
-        """
-        def resolve_value(value: Any) -> Any:
-            """Recursively resolve placeholders in a value."""
-            if isinstance(value, str) and value.startswith('@generated:'):
-                # Parse placeholder: @generated:type:index
-                parts = value.split(':')
-                if len(parts) == 3:
-                    _, event_type, index_str = parts
-                    try:
-                        index = int(index_str)
-                        if event_type in generated_ids and index < len(generated_ids[event_type]):
-                            resolved = generated_ids[event_type][index]
-                            if self.verbose:
-                                self.log(f"Resolved placeholder {value} -> {resolved}")
-                            return resolved
-                    except ValueError:
-                        pass
-                # If we can't resolve, keep the placeholder
-                if self.verbose:
-                    self.log(f"Could not resolve placeholder: {value}")
-                return value
-            elif isinstance(value, dict):
-                return {k: resolve_value(v) for k, v in value.items()}
-            elif isinstance(value, list):
-                return [resolve_value(item) for item in value]
-            else:
-                return value
-
-        # Resolve placeholders in event_plaintext
-        if 'event_plaintext' in envelope:
-            envelope['event_plaintext'] = resolve_value(envelope['event_plaintext'])
-
-        # Resolve placeholders in deps
-        if 'deps' in envelope:
-            resolved_deps = []
-            for dep in envelope['deps']:
-                if isinstance(dep, str) and dep.startswith('@generated:'):
-                    # Format as proper dependency: type:id
-                    parts = dep.split(':')
-                    if len(parts) == 3:
-                        _, event_type, index_str = parts
-                        try:
-                            index = int(index_str)
-                            if event_type in generated_ids and index < len(generated_ids[event_type]):
-                                resolved_id = generated_ids[event_type][index]
-                                resolved_dep = f"{event_type}:{resolved_id}"
-                                resolved_deps.append(resolved_dep)
-                                if self.verbose:
-                                    self.log(f"Resolved dependency {dep} -> {resolved_dep}")
-                            else:
-                                resolved_deps.append(dep)  # Keep placeholder if can't resolve
-                        except ValueError:
-                            resolved_deps.append(dep)
-                    else:
-                        resolved_deps.append(dep)
-                else:
-                    resolved_deps.append(dep)
-            envelope['deps'] = resolved_deps
+    # Placeholder resolution removed: flows emit sequentially and provide real IDs.
 
     def _process_outgoing_queue(self, db: sqlite3.Connection) -> None:
         """Process any envelopes in the outgoing queue."""

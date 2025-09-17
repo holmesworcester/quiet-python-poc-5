@@ -85,3 +85,34 @@ this way you can guess at the choice in CLI with a number
 we should have a $last-created shortcut for the invite command where you can just use the last created invite.
 /state should show the state of all panels (e.g. which channel is active, which user, which network, etc.) and then /views could show a text illustration of all panels. 
 being able to see a log of how envelopes flow through handlers would be interesting
+
+maybe i should focus directly on the commands first and not worry about the demo as much yet. 
+i don't like how pipeline runner has tons of code in it for resolving placeholder id's. this should fit into resolve_deps exclusively. maybe the issue is they don't have an event_id yet?
+
+maybe there's a better way of chaining the creation of events. 
+
+TODO: if handler loading order matters at all, that's bad, because it could be OS or timing specific. handler loading order shouldn't matter in the current formulation. We should make ordering deterministic, arbitrary.
+TODO: standardize naming of fields on all event types -- it might be good to centralize event/envelope creation somewhere so events only think about their own bespoke fields and list their deps.
+
+i think part of the problem here is that we are cramming together our pure
+params=>envelopes logic with our "chain and present to API" logic. one thing we could
+do is add an api.py or api_ops.py for each event and leave commands to be purely for
+functions that consume params and emit envelopes. then we can do some mumbo jumbo on
+the core side so that devs can write simple chains in api.py that create events, get
+id's, create more events with those id's, return a query, etc. in the most dead-simple
+way where everything is encapsulated. there also seems like something similar going
+on with jobs and reflectors, where we need to run a query and emit envelopes in
+the jobs case, or we need to receive an envelope, run a query, and emit envelopes
+in the reflectors case. are these cases so different? could we combine them? e.g.
+sync-request would have a command that takes params (dest_ip, transit_key, etc) and
+events and adds the correct data to outgoing envelopes. and a job could query the
+window for id's, apply the bloom, query for events, and pass those to the command,
+perhaps one by one. let's consider this!
+
+there's an intuition gnawing at me that flows could be simpler. like you could emit an envelope that said what its chain was, or what its relationship was to future envelopes. buuut. that's probably harder to express. 
+
+will we have any commands that do multiple things, beyond what is in flows? or will they all be "create" now? if so, maybe we should just call commands "create".
+
+create seems very light for a cateogry of thing. we could just use a protocol-provided emit_envelope function within 
+
+the idea of chaining together things that use the pipeline and get an id or final envelope from it, and can query, for things where we don't really care about concurrency, is really useful. it lets us have this opinionated pipeline thing for organizing the way stuff gets made and validated and keeping that under control, while also having a way to just write normal programs for things. reflectors, jobs, and commands all ended up being this: "flows". I like the name flows but we could just call them commands to keep with CQRS. (though I think ours do a bit more because they can query too.)   

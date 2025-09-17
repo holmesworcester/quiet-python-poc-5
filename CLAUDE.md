@@ -63,8 +63,8 @@ The system uses an **envelope-centric architecture** where all data flows throug
    - `event_store.py`: Stores validated events
 
 3. **Event Types**: Protocol-specific event definitions in `protocols/quiet/events/`:
-   - Each event type (identity, message, group, channel, etc.) has commands, validators, and projectors
-   - Commands are pure functions that create envelopes with dependency declarations
+   - Each event type (identity, message, group, channel, etc.) has flows, validators, projectors, and queries
+   - Flows orchestrate emit + query using `FlowCtx.emit_event` and return `{ids, data}`
    - Projectors convert events to database deltas without direct DB access
 
 ### Database Access Rules
@@ -78,7 +78,7 @@ The `/core` directory contains protocol-agnostic framework code:
 - `handlers.py`: Base handler class and registry
 - `api.py`: API client that uses OpenAPI spec for operation discovery
 - `db.py`: Database initialization and connection management
-- `commands.py`: Command registry for event types
+  (legacy command registry removed; flows register via `@flow_op`)
 
 ### Protocol Implementation
 The `/protocols/quiet` directory contains the Quiet protocol implementation:

@@ -21,81 +21,39 @@ class TestMultiIdentityChat:
                 db_path=Path(tmp.name)
             )
 
-            # Create two identities using core identity
-            alice_result = api.execute_operation('core.identity_create', {'name': 'Alice'})
-            alice_id = alice_result['ids']['identity']
-
-            bob_result = api.execute_operation('core.identity_create', {'name': 'Bob'})
-            bob_id = bob_result['ids']['identity']
-
-            # Each creates peer first, then network
-            alice_peer = api.execute_operation('peer.create_peer', {
-                'identity_id': alice_id,
-                'username': 'Alice'
+            # Use identity.create_as_user to bootstrap each user's network
+            alice_boot = api.execute_operation('identity.create_as_user', {
+                'name': 'Alice',
+                'network_name': 'Alice Private Network',
+                'group_name': 'Alice Group',
+                'channel_name': 'alice-channel'
             })
-            alice_peer_id = alice_peer['ids']['peer']
+            alice_id = alice_boot['ids']['identity']
+            alice_peer_id = alice_boot['ids']['peer']
+            alice_network_id = alice_boot['ids']['network']
+            alice_group_id = alice_boot['ids']['group']
+            alice_channel_id = alice_boot['ids']['channel']
 
-            alice_network = api.execute_operation('network.create_network', {
-                'peer_id': alice_peer_id,
-                'name': 'Alice Private Network'
+            bob_boot = api.execute_operation('identity.create_as_user', {
+                'name': 'Bob',
+                'network_name': 'Bob Private Network',
+                'group_name': 'Bob Group',
+                'channel_name': 'bob-channel'
             })
-            alice_network_id = alice_network['ids']['network']
-
-            # Create group for Alice
-            alice_group = api.execute_operation('group.create_group', {
-                'peer_id': alice_peer_id,
-                'network_id': alice_network_id,
-                'name': 'Alice Group'
-            })
-            alice_group_id = alice_group['ids']['group']
-
-            # Create channel for Alice
-            alice_channel = api.execute_operation('channel.create_channel', {
-                'peer_id': alice_peer_id,
-                'network_id': alice_network_id,
-                'group_id': alice_group_id,
-                'name': 'alice-channel'
-            })
-            alice_channel_id = alice_channel['ids']['channel']
-
-            # Bob creates peer first, then network
-            bob_peer = api.execute_operation('peer.create_peer', {
-                'identity_id': bob_id,
-                'username': 'Bob'
-            })
-            bob_peer_id = bob_peer['ids']['peer']
-
-            bob_network = api.execute_operation('network.create_network', {
-                'peer_id': bob_peer_id,
-                'name': 'Bob Private Network'
-            })
-            bob_network_id = bob_network['ids']['network']
-
-            # Create group for Bob
-            bob_group = api.execute_operation('group.create_group', {
-                'peer_id': bob_peer_id,
-                'network_id': bob_network_id,
-                'name': 'Bob Group'
-            })
-            bob_group_id = bob_group['ids']['group']
-
-            # Create channel for Bob
-            bob_channel = api.execute_operation('channel.create_channel', {
-                'peer_id': bob_peer_id,
-                'network_id': bob_network_id,
-                'group_id': bob_group_id,
-                'name': 'bob-channel'
-            })
-            bob_channel_id = bob_channel['ids']['channel']
+            bob_id = bob_boot['ids']['identity']
+            bob_peer_id = bob_boot['ids']['peer']
+            bob_network_id = bob_boot['ids']['network']
+            bob_group_id = bob_boot['ids']['group']
+            bob_channel_id = bob_boot['ids']['channel']
 
             # Each sends messages in their own network
-            alice_msg = api.execute_operation('message.create_message', {
+            alice_msg = api.execute_operation('message.create', {
                 'peer_id': alice_peer_id,
                 'channel_id': alice_channel_id,
                 'content': "Alice's secret message"
             })
 
-            bob_msg = api.execute_operation('message.create_message', {
+            bob_msg = api.execute_operation('message.create', {
                 'peer_id': bob_peer_id,
                 'channel_id': bob_channel_id,
                 'content': "Bob's confidential message"
@@ -134,23 +92,23 @@ class TestMultiIdentityChat:
             )
 
             # Alice creates an identity, peer, and network
-            alice_result = api.execute_operation('core.identity_create', {'name': 'Alice'})
+            alice_result = api.execute_operation('identity.create', {'name': 'Alice'})
             alice_id = alice_result['ids']['identity']
 
-            alice_peer = api.execute_operation('peer.create_peer', {
+            alice_peer = api.execute_operation('peer.create', {
                 'identity_id': alice_id,
                 'username': 'Alice'
             })
             alice_peer_id = alice_peer['ids']['peer']
 
-            network_result = api.execute_operation('network.create_network', {
+            network_result = api.execute_operation('network.create', {
                 'peer_id': alice_peer_id,
                 'name': 'Group Chat Network'
             })
             network_id = network_result['ids']['network']
 
             # Create group
-            group_result = api.execute_operation('group.create_group', {
+            group_result = api.execute_operation('group.create', {
                 'peer_id': alice_peer_id,
                 'network_id': network_id,
                 'name': 'Main Group'
@@ -158,7 +116,7 @@ class TestMultiIdentityChat:
             group_id = group_result['ids']['group']
 
             # Create channel
-            channel_result = api.execute_operation('channel.create_channel', {
+            channel_result = api.execute_operation('channel.create', {
                 'peer_id': alice_peer_id,
                 'network_id': network_id,
                 'group_id': group_id,
@@ -176,7 +134,7 @@ class TestMultiIdentityChat:
             print(f"Alice users: {alice_user_ids}")
 
             # Alice creates an invite link
-            invite_result = api.execute_operation('invite.create_invite', {
+            invite_result = api.execute_operation('invite.create', {
                 'peer_id': alice_peer_id,
                 'network_id': network_id,
                 'group_id': group_id
@@ -228,7 +186,7 @@ class TestMultiIdentityChat:
             assert len(charlie_users) > 0, f"Charlie has no user entries"
 
             # Everyone sends messages
-            alice_msg = api.execute_operation('message.create_message', {
+            alice_msg = api.execute_operation('message.create', {
                 'peer_id': alice_peer_id,
                 'channel_id': channel_id,
                 'content': 'Welcome everyone!'
@@ -238,7 +196,7 @@ class TestMultiIdentityChat:
             jobs_triggered = api.tick_scheduler()
             print(f"Jobs triggered after Alice's message: {jobs_triggered}")
 
-            bob_msg = api.execute_operation('message.create_message', {
+            bob_msg = api.execute_operation('message.create', {
                 'peer_id': bob_peer_id,
                 'channel_id': channel_id,
                 'content': 'Thanks for the invite!'
@@ -248,7 +206,7 @@ class TestMultiIdentityChat:
             jobs_triggered = api.tick_scheduler()
             print(f"Jobs triggered after Bob's message: {jobs_triggered}")
 
-            charlie_msg = api.execute_operation('message.create_message', {
+            charlie_msg = api.execute_operation('message.create', {
                 'peer_id': charlie_peer_id,
                 'channel_id': channel_id,
                 'content': 'Happy to be here!'

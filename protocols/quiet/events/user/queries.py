@@ -36,14 +36,10 @@ def get(db: ReadOnlyConnection, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     # TODO: Properly check network membership
     cursor = db.execute(
         """
-        SELECT u.*, i.name
+        SELECT u.*
         FROM users u
-        LEFT JOIN core_identities i ON u.peer_id = i.identity_id
         WHERE u.network_id = ?
-        AND EXISTS (
-            SELECT 1 FROM core_identities i2
-            WHERE i2.identity_id = ?
-        )
+          AND EXISTS (SELECT 1 FROM identities i2 WHERE i2.identity_id = ?)
         ORDER BY u.joined_at DESC
         LIMIT ? OFFSET ?
         """,
@@ -72,9 +68,8 @@ def get_user(db: ReadOnlyConnection, params: Dict[str, Any]) -> Optional[Dict[st
     
     cursor = db.execute(
         """
-        SELECT u.*, i.name
+        SELECT u.*
         FROM users u
-        LEFT JOIN core_identities i ON u.peer_id = i.identity_id
         WHERE u.user_id = ?
         """,
         (user_id,)
@@ -101,9 +96,8 @@ def get_user_by_peer_id(db: ReadOnlyConnection, params: Dict[str, Any]) -> Optio
     
     cursor = db.execute(
         """
-        SELECT u.*, i.name
+        SELECT u.*
         FROM users u
-        LEFT JOIN core_identities i ON u.peer_id = i.identity_id
         WHERE u.peer_id = ? AND u.network_id = ?
         ORDER BY u.joined_at DESC
         LIMIT 1

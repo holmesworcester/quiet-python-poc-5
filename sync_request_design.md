@@ -140,7 +140,7 @@ This makes the architecture super consistent:
 
 ### Sync as Event-Type with Command
 ```python
-# protocols/quiet/events/sync/commands.py
+# protocols/quiet/events/sync_request/flows.py
 def sync_request(network_id: str, peers: List[Dict]) -> List[Dict]:
     """Create sync request envelopes. Peers passed as params to keep pure."""
     envelopes = []

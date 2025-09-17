@@ -233,14 +233,31 @@ def handler(name: str, filter_func: FilterFunc) -> Callable[[Callable[[dict[str,
     return decorator
 
 
-def command_response(func: Callable[[str, list[dict[str, Any]], Any], dict[str, Any]]) -> Callable[[str, list[dict[str, Any]], Any], dict[str, Any]]:
-    """
-    Decorator to mark command response handlers.
 
-    Response handlers run after pipeline processing completes and have access to:
-    - request_id: The unique request identifier
-    - envelopes: All processed envelopes from this request
-    - db: Database connection for running follow-up queries
+
+from typing import Callable as _Callable
+
+
+def response_handler(command_name: str) -> Any:
+    # Deprecated shim
+    def decorator(func: Any) -> Any:
+        raise NotImplementedError("response handlers are deprecated; use flows instead")
+    return decorator
+
+
+def envelope_reducer(func: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]) -> Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]:
+    """
+    Decorator to mark envelope reducer functions.
+
+    Reducers process a stream of envelopes and reduce them to summary data.
+    Used by commands that generate many envelopes to avoid storing all of them.
+
+    Takes:
+    - accumulator: The current accumulated state (empty dict on first call)
+    - envelope: The current envelope being processed
+
+    Returns:
+    - Updated accumulator
     """
     import functools
     import inspect
@@ -248,76 +265,40 @@ def command_response(func: Callable[[str, list[dict[str, Any]], Any], dict[str, 
     sig = inspect.signature(func)
     params = list(sig.parameters.keys())
 
-    if len(params) != 3:
+    if len(params) != 2:
         raise TypeError(
-            f"{func.__name__} must have exactly 3 parameters (request_id, envelopes, db), got {len(params)}"
+            f"{func.__name__} must have exactly 2 parameters (accumulator, envelope), got {len(params)}"
         )
 
     @functools.wraps(func)
-    def wrapper(request_id: str, envelopes: list[dict[str, Any]], db: Any) -> dict[str, Any]:
-        if not isinstance(request_id, str):
-            raise TypeError(f"Expected str for request_id, got {type(request_id).__name__}")
+    def wrapper(accumulator: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(accumulator, dict):
+            raise TypeError(f"Expected dict for accumulator, got {type(accumulator).__name__}")
 
-        if not isinstance(envelopes, list):
-            raise TypeError(f"Expected list for envelopes, got {type(envelopes).__name__}")
+        if not isinstance(envelope, dict):
+            raise TypeError(f"Expected dict for envelope, got {type(envelope).__name__}")
 
-        result = func(request_id, envelopes, db)
+        result = func(accumulator, envelope)
 
         if not isinstance(result, dict):
             raise TypeError(f"{func.__name__} must return dict, got {type(result).__name__}")
 
         return result
 
-    wrapper._is_command_response = True  # type: ignore
+    wrapper._is_envelope_reducer = True  # type: ignore
+    wrapper._is_envelope_reducer = True  # type: ignore
     return wrapper
 
-
+def command_response(func: Callable[[str, list[dict[str, Any]], Any], dict[str, Any]]) -> Callable[[str, list[dict[str, Any]], Any], dict[str, Any]]:
+    # Deprecated: response handlers removed in favor of flows
+    raise NotImplementedError("response handlers are deprecated; use flows instead")
 from typing import Callable as _Callable
 
 
-def response_handler(command_name: str) -> _Callable[[Callable[[dict[str, Any], dict[str, Any], Any], dict[str, Any]]], Callable[[dict[str, Any], dict[str, Any], Any], dict[str, Any]]]:
-    """
-    Decorator to register a response handler for a command.
-
-    Response handlers shape the API response after pipeline processing.
-    They have access to:
-    - stored_ids: Dict of event_type -> event_id for stored events
-    - params: Original command parameters
-    - db: Database connection for running queries
-    """
-    def decorator(func: Callable[[dict[str, str], dict[str, Any], Any], dict[str, Any]]) -> Callable[[dict[str, str], dict[str, Any], Any], dict[str, Any]]:
-        import functools
-        import inspect
-
-        sig = inspect.signature(func)
-        params_list = list(sig.parameters.keys())
-
-        if len(params_list) != 3:
-            raise TypeError(
-                f"{func.__name__} must have exactly 3 parameters (stored_ids, params, db), got {len(params_list)}"
-            )
-
-        @functools.wraps(func)
-        def wrapper(stored_ids: dict[str, str], params: dict[str, Any], db: Any) -> dict[str, Any]:
-            if not isinstance(stored_ids, dict):
-                raise TypeError(f"Expected dict for stored_ids, got {type(stored_ids).__name__}")
-
-            if not isinstance(params, dict):
-                raise TypeError(f"Expected dict for params, got {type(params).__name__}")
-
-            result = func(stored_ids, params, db)
-
-            if not isinstance(result, dict):
-                raise TypeError(f"{func.__name__} must return dict, got {type(result).__name__}")
-
-            return result
-
-        # Auto-register the response handler
-        from core.commands import command_registry
-        command_registry.register_response_handler(command_name, wrapper)
-
-        return wrapper
-
+def response_handler(command_name: str) -> Any:
+    # Deprecated shim
+    def decorator(func: Any) -> Any:
+        raise NotImplementedError("response handlers are deprecated; use flows instead")
     return decorator
 
 

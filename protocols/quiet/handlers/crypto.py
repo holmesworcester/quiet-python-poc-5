@@ -286,6 +286,25 @@ def encrypt_event(envelope: dict[str, Any]) -> dict[str, Any]:
     event_plaintext = envelope.get('event_plaintext', {})
     event_type = envelope.get('event_type')
 
+    # Identity events: compute deterministic ID only (no encryption)
+    if event_type == 'identity':
+        # Use the identity_id from plaintext as the event_id
+        # This keeps identity references consistent across the system.
+        identity_id = event_plaintext.get('identity_id')
+        if not identity_id:
+            # Fallback: derive from public_key if necessary
+            pub = event_plaintext.get('public_key', '')
+            try:
+                pb = bytes.fromhex(pub)
+                h = hashlib.blake2b(pb, digest_size=16)
+                identity_id = h.hexdigest()
+            except Exception:
+                identity_id = ''
+        envelope['event_id'] = identity_id
+        # Do not set event_ciphertext or key_ref for identity
+        # Leave write_to_store untouched (projector will handle storage)
+        return envelope
+
     # Regular event encryption
     # TODO: Implement actual encryption logic
     # Would normally:

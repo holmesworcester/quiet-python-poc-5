@@ -35,11 +35,14 @@ class ValidateHandler(Handler):
 
         # For self-created events, they get validated after signing but before encryption (no event_id yet)
         # For received events, they get validated after decryption (event_id exists)
+        # Allow identity events to bypass signature (local-only)
+        is_identity = envelope.get('event_plaintext', {}).get('type') == 'identity'
+        sig_ok = envelope.get('sig_checked') is True or is_identity
         return (
             validate_envelope_fields(envelope, {'event_plaintext', 'event_type'}) and
-            envelope.get('sig_checked') is True and
+            sig_ok and
             not envelope.get('validated', False) and
-            (envelope.get('self_created') or 'event_id' in envelope)  # Self-created don't have event_id yet
+            (envelope.get('self_created') or 'event_id' in envelope)
         )
     
     def process(self, envelope: dict[str, Any], db: sqlite3.Connection) -> List[dict[str, Any]]:

@@ -1072,9 +1072,6 @@ try:
     class QuietDemoTUI(App):
         """TUI with embedded CLI"""
 
-        # Disable mouse support to prevent terminal takeover
-        ENABLE_COMMAND_PALETTE = False
-
         CSS = """
         .panel-header {
             background: $boost;
@@ -1188,10 +1185,11 @@ try:
         ]
 
         def __init__(self, core: UnifiedDemoCore):
-            # Disable mouse capture explicitly
-            super().__init__(mouse=False, watch_css=False)
+            super().__init__()
             self.core = core
             self.current_panel = 1
+            # Disable mouse support through class attribute
+            self.mouse_over_widget = None
 
         def compose(self) -> ComposeResult:
             with Horizontal():

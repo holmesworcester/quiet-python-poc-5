@@ -47,7 +47,8 @@ class API:
 
         # Initialize job scheduler
         self.scheduler = JobScheduler(
-            db_path=str(self.db_path)
+            db_path=str(self.db_path),
+            protocol_name=self.protocol_dir.name,
         )
         
         # Load OpenAPI spec if present (optional)
@@ -91,7 +92,6 @@ class API:
     
     def _validate_operations(self) -> None:
         """Validate that all operations have corresponding implementations."""
-        from core.commands import command_registry
 
         missing_implementations = []
 
@@ -105,8 +105,10 @@ class API:
 
             elif operation['method'] == 'post':
                 # Should be a command
-                if not command_registry.has_command(operation_id):
-                    missing_implementations.append((operation_id, 'command'))
+                # Commands deprecated; ensure flow exists instead
+                from core.flows import flows_registry
+                if not flows_registry.has_flow(operation_id):
+                    missing_implementations.append((operation_id, 'flow'))
 
             elif operation['method'] == 'get':
                 # Should be a query
@@ -137,8 +139,8 @@ class API:
             sys.path.insert(0, str(protocol_root))
 
         # Import registries
-        from core.commands import command_registry
         from core.queries import query_registry
+        from core.flows import flows_registry
 
         # Use the global query registry which has system queries
         self.query_registry = query_registry
@@ -156,47 +158,10 @@ class API:
                     continue
 
                 event_type = event_dir.name
-                commands_file = event_dir / 'commands.py'
 
-                if commands_file.exists():
-                    try:
-                        # Import the commands module
-                        module_name = f'protocols.{self.protocol_dir.name}.events.{event_type}.commands'
-                        module = importlib.import_module(module_name)
-
-                        # Find all command functions
-                        import inspect
-                        for name in dir(module):
-                            obj = getattr(module, name)
-                            if callable(obj) and hasattr(obj, '_is_command'):
-                                # Register with event_type.function_name format
-                                func_name = getattr(obj, '_original_name', name)
-
-                                # Simple consistent mapping: event_type.function_name
-                                operation_id = f'{event_type}.{func_name}'
-                                command_registry.register(operation_id, obj)
-
-                                # Capture optional type metadata
-                                param_t = getattr(obj, '_param_type', None)
-                                result_t = getattr(obj, '_result_type', None)
-                                if param_t is not None or result_t is not None:
-                                    self.type_index[operation_id] = {
-                                        'params': param_t,
-                                        'result': result_t
-                                    }
-
-                                # Also register response handlers if they exist
-                                response_func_name = f'{func_name}_response'
-                                if hasattr(module, response_func_name):
-                                    response_func = getattr(module, response_func_name)
-                                    command_registry.register_response_handler(operation_id, response_func)
-
-                    except ImportError as e:
-                        # Module couldn't be imported, skip it
-                        pass
-
-                # Also inspect queries for type metadata (registration handled by query_registry)
-                queries_file = event_dir / 'queries.py'
+        # Commands removed: only import flows to register @flow_op operations
+        # Also inspect queries for type metadata (registration handled by query_registry)
+        queries_file = event_dir / 'queries.py'
                 if queries_file.exists():
                     try:
                         q_module_name = f'protocols.{self.protocol_dir.name}.events.{event_type}.queries'
@@ -216,18 +181,53 @@ class API:
                     except ImportError:
                         pass
 
+                # Import flows to register @flow_op operations (if present)
+                flows_file = event_dir / 'flows.py'
+                if flows_file.exists():
+                    try:
+                        f_module_name = f'protocols.{self.protocol_dir.name}.events.{event_type}.flows'
+                        importlib.import_module(f_module_name)
+                    except ImportError:
+                        pass
+
+        # Load protocol-level API exposure map, if present
+        self._api_exposed: dict[str, str] | None = None
+        try:
+            api_mod = importlib.import_module(f'protocols.{self.protocol_dir.name}.api')
+            if hasattr(api_mod, 'EXPOSED') and isinstance(api_mod.EXPOSED, dict):
+                # Normalize keys to strings
+                self._api_exposed = {str(k): str(v) for k, v in api_mod.EXPOSED.items()}
+            # Apply any flow aliases if provided
+            if hasattr(api_mod, 'ALIASES') and isinstance(api_mod.ALIASES, dict):
+                from core.flows import flows_registry as _flows_registry
+                # Ensure flows are imported before aliasing
+                for event_dir in (self.protocol_dir / 'events').iterdir():
+                    if event_dir.is_dir() and (event_dir / 'flows.py').exists():
+                        try:
+                            importlib.import_module(f"protocols.{self.protocol_dir.name}.events.{event_dir.name}.flows")
+                        except Exception:
+                            pass
+                for alias, target in api_mod.ALIASES.items():
+                    try:
+                        _flows_registry.alias(str(alias), str(target))
+                    except Exception as e:
+                        # Surface alias issues clearly
+                        print(f"Warning: failed to alias flow '{alias}' -> '{target}': {e}")
+        except ImportError:
+            self._api_exposed = None
+
     def _synthesize_operations_from_registries(self) -> None:
         """When no OpenAPI spec is present, derive an operation map from registries.
 
-        - Commands => method post
+        - Flows  => method post
         - Queries  => method get
         """
-        from core.commands import command_registry
+        from core.flows import flows_registry
         from core.queries import query_registry
 
         ops: Dict[str, Dict[str, object]] = {}
 
-        for op in command_registry.list_commands():
+        for op in flows_registry.list_flows():
             ops[op] = {
                 'path': f'/{op.split(".", 1)[0]}',
                 'method': 'post',
@@ -235,7 +235,6 @@ class API:
             }
 
         for op in query_registry.list_queries():
-            # avoid overwriting if same id appears in both (shouldn't)
             if op not in ops:
                 ops[op] = {
                     'path': f'/{op.split(".", 1)[0]}s',
@@ -247,18 +246,82 @@ class API:
     
     def execute_operation(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Any:
         """Execute an operation by its OpenAPI operation ID."""
+        # If protocol-level API exposure is defined, enforce it
+        if hasattr(self, '_api_exposed') and self._api_exposed is not None:
+            # Core operations always allowed
+            if operation_id.startswith('core.'):
+                core_op = operation_id.replace('core.', 'core_')
+                return self._execute_core_command(core_op, params)
+
+            if operation_id not in self._api_exposed:
+                raise ValueError(f"Operation not exposed by API: {operation_id}")
+
+            kind = self._api_exposed[operation_id]
+
+            if kind == 'flow':
+                from core.flows import flows_registry
+                if not flows_registry.has_flow(operation_id):
+                    raise ValueError(f"Flow not registered for: {operation_id}")
+                db = get_connection(str(self.db_path))
+                try:
+                    import uuid
+                    request_id = str(uuid.uuid4())
+                    enriched_params: Dict[str, Any] = dict(params or {})
+                    enriched_params['_db'] = db
+                    enriched_params['_runner'] = self.runner
+                    enriched_params['_protocol_dir'] = str(self.protocol_dir)
+                    enriched_params['_request_id'] = request_id
+                    return flows_registry.execute(operation_id, enriched_params)
+                finally:
+                    db.close()
+            elif kind == 'command':
+                return self._execute_command(operation_id, params)
+            elif kind == 'query':
+                return self._execute_query(operation_id, params)
+            else:
+                raise ValueError(f"Unknown EXPOSED kind for {operation_id}: {kind}")
+
+        # No protocol-level API exposure: prefer flow ops if registered
+        try:
+            from core.flows import flows_registry
+            if flows_registry.has_flow(operation_id):
+                db = get_connection(str(self.db_path))
+                try:
+                    import uuid
+                    request_id = str(uuid.uuid4())
+                    enriched_params: Dict[str, Any] = dict(params or {})
+                    enriched_params['_db'] = db
+                    enriched_params['_runner'] = self.runner
+                    enriched_params['_protocol_dir'] = str(self.protocol_dir)
+                    enriched_params['_request_id'] = request_id
+                    return flows_registry.execute(operation_id, enriched_params)
+                finally:
+                    db.close()
+        except Exception:
+            pass
         # Check if this starts with 'core.' for core operations
         if operation_id.startswith('core.'):
             # Map to internal core function names
             core_op = operation_id.replace('core.', 'core_')
             return self._execute_core_command(core_op, params)
 
-        # In specless mode or if operation not parsed from spec, fall back to registries
+        # In specless mode or if operation not parsed from spec, fall back to flow/query registries
         if operation_id not in self.operations:
-            from core.commands import command_registry
             from core.queries import query_registry
-            if command_registry.has_command(operation_id):
-                return self._execute_command(operation_id, params)
+            from core.flows import flows_registry
+            if flows_registry.has_flow(operation_id):
+                db = get_connection(str(self.db_path))
+                try:
+                    import uuid
+                    request_id = str(uuid.uuid4())
+                    enriched_params: Dict[str, Any] = dict(params or {})
+                    enriched_params['_db'] = db
+                    enriched_params['_runner'] = self.runner
+                    enriched_params['_protocol_dir'] = str(self.protocol_dir)
+                    enriched_params['_request_id'] = request_id
+                    return flows_registry.execute(operation_id, enriched_params)
+                finally:
+                    db.close()
             if query_registry.has_query(operation_id):
                 return self._execute_query(operation_id, params)
             raise ValueError(f"Unknown operation: {operation_id}")
@@ -266,8 +329,20 @@ class API:
         operation = self.operations[operation_id]
 
         if operation['method'] == 'post':
-            # Execute as command
-            return self._execute_command(operation_id, params)
+            # Execute as flow (commands removed)
+            from core.flows import flows_registry
+            db = get_connection(str(self.db_path))
+            try:
+                import uuid
+                request_id = str(uuid.uuid4())
+                enriched_params: Dict[str, Any] = dict(params or {})
+                enriched_params['_db'] = db
+                enriched_params['_runner'] = self.runner
+                enriched_params['_protocol_dir'] = str(self.protocol_dir)
+                enriched_params['_request_id'] = request_id
+                return flows_registry.execute(operation_id, enriched_params)
+            finally:
+                db.close()
         elif operation['method'] == 'get':
             # Execute as query
             return self._execute_query(operation_id, params)
@@ -275,50 +350,8 @@ class API:
             raise ValueError(f"Unsupported method: {operation['method']}")
     
     def _execute_command(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Execute a command through the pipeline runner and return standard response."""
-        from core.commands import command_registry
-        import uuid
-
-        # Get database connection
-        db = get_connection(str(self.db_path))
-
-        try:
-            # Generate request ID for tracking
-            request_id = str(uuid.uuid4())
-
-            # Execute command through registry
-            envelopes = command_registry.execute(operation_id, params or {}, db)
-
-            # Add request_id to all envelopes for tracking
-            for envelope in envelopes:
-                envelope['request_id'] = request_id
-
-            # Run the pipeline to process the envelopes
-            # Pipeline returns mapping of event_type -> event_id for stored events
-            stored_ids = {}
-            if envelopes:
-                stored_ids = self.runner.run(
-                    protocol_dir=str(self.protocol_dir),
-                    input_envelopes=envelopes,
-                    db=db  # Pass db so pipeline can track stored events
-                )
-
-            # Check if command has a response handler
-            response_handler = command_registry.get_response_handler(operation_id)
-
-            if response_handler:
-                # Let the command shape its own response with query data
-                from typing import Dict as _Dict, Any as _Any, cast as _cast
-                return _cast(_Dict[str, _Any], response_handler(stored_ids, params or {}, db))
-            else:
-                # Fallback to standard response with just IDs
-                return {
-                    "ids": stored_ids,
-                    "data": {}
-                }
-            
-        finally:
-            db.close()
+        """Commands deprecated; flows handle operations."""
+        raise ValueError(f"Commands are deprecated. Use flows for operation: {operation_id}")
 
     def _execute_core_command(self, operation_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute a core framework command (not through pipeline)."""
@@ -353,27 +386,18 @@ class API:
 
     def tick_scheduler(self) -> int:
         """
-        Check for due jobs and process any run_job envelopes.
+        Check for due jobs and execute their operations directly.
 
         Returns:
             Number of jobs triggered
         """
-        # Get run_job envelopes from scheduler
-        envelopes = self.scheduler.tick()
-
-        if envelopes:
-            # Process the run_job envelopes through the pipeline
-            db = get_connection(str(self.db_path))
+        due_jobs = self.scheduler.tick()
+        for job in due_jobs:
             try:
-                self.runner.run(
-                    protocol_dir=str(self.protocol_dir),
-                    input_envelopes=envelopes,
-                    db=db
-                )
-            finally:
-                db.close()
-
-        return len(envelopes)
+                self.execute_operation(job['op'], job.get('params', {}))
+            except Exception as e:
+                print(f"[Scheduler] Job {job['op']} failed: {e}")
+        return len(due_jobs)
     
     def __getattr__(self, name: str) -> Any:
         """Dynamic method creation for OpenAPI operations."""
@@ -386,6 +410,9 @@ class API:
         
         # If not found, raise AttributeError
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+# Backward-compatible alias (tests/imports may still use APIClient)
+APIClient = API
 
     # ---------------------------------------------------------------------
     # Debug/Introspection helpers
@@ -403,7 +430,6 @@ class API:
         import sqlite3 as _sqlite3
 
         tables_to_dump = [
-            "core_identities",
             "peers",
             "users",
             "groups",
@@ -439,7 +465,7 @@ class API:
                     order_by = "received_at DESC"
                 elif table == "messages":
                     order_by = "created_at DESC"
-                elif table in ("groups", "channels", "users", "peers", "core_identities"):
+                elif table in ("groups", "channels", "users", "peers"):
                     # best-effort chronological ordering if timestamp column exists
                     # will fallback below if column missing
                     order_by = "created_at DESC"

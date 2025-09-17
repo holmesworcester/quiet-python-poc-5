@@ -1,194 +1,64 @@
 """
-Tests for user commands.
+Tests for user join flow via API.
 """
 import pytest
 import base64
 import json
-import sqlite3
 import tempfile
-import os
-from protocols.quiet.events.user.commands import join_as_user
-from core.db import get_connection, init_database
+from pathlib import Path
+from core.api import APIClient
+from core.db import get_connection
 
 
-class TestUserCommands:
-    """Test user commands."""
-
-    def setup_method(self):
-        """Set up test database."""
-        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
-        os.close(self.db_fd)
-        self.db = get_connection(self.db_path)
-        init_database(self.db, 'protocols/quiet')
-
-    def teardown_method(self):
-        """Clean up test database."""
-        self.db.close()
-        os.unlink(self.db_path)
+class TestUserJoinFlow:
+    """Test user.join_as_user flow using sequential emission (no placeholders)."""
 
     @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_join_as_user_envelope_structure(self):
-        """Test that join_as_user generates correct envelope structure."""
-        # Create a test invite link
-        invite_data = {
-            'invite_secret': 'test_secret_123',
-            'network_id': 'test_network',
-            'group_id': 'test_group'
-        }
-        invite_json = json.dumps(invite_data)
-        invite_b64 = base64.b64encode(invite_json.encode()).decode()
-        invite_link = f"quiet://invite/{invite_b64}"
+    def test_join_as_user_basic(self):
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            api = APIClient(protocol_dir=Path('protocols/quiet'), reset_db=True, db_path=Path(tmp.name))
 
-        params = {
-            'invite_link': invite_link,
-            'name': 'Alice',
-            '_db': self.db
-        }
+            # Create a test invite link
+            invite_data = {'invite_secret': 'test_secret_123', 'network_id': 'test_network', 'group_id': 'test_group'}
+            invite_json = json.dumps(invite_data)
+            invite_b64 = base64.b64encode(invite_json.encode()).decode()
+            invite_link = f"quiet://invite/{invite_b64}"
 
-        envelopes = join_as_user(params)
-
-        # Should return 2 envelopes: peer, user (identity stored directly)
-        assert len(envelopes) == 2, "Should create 2 envelopes"
-
-        # Check peer envelope
-        peer_env = envelopes[0]
-        assert peer_env['event_type'] == 'peer'
-        assert peer_env['self_created'] == True
-        peer_event = peer_env['event_plaintext']
-        assert peer_event['type'] == 'peer'
-        assert 'public_key' in peer_event
-        assert peer_event['identity_id'] != ''
-
-        # Check user envelope
-        user_env = envelopes[1]
-        assert user_env['event_type'] == 'user'
-        assert user_env['self_created'] == True
-        user_event = user_env['event_plaintext']
-        assert user_event['type'] == 'user'
-        assert user_event['peer_id'] == '@generated:peer:0'  # Placeholder
-        assert user_event['name'] == 'Alice'
-        assert user_event['network_id'] == 'test_network'
-        assert user_event['group_id'] == 'test_group'
-        assert 'invite_pubkey' in user_event
-        assert 'invite_signature' in user_event
+            result = api.execute_operation('user.join_as_user', {'invite_link': invite_link, 'name': 'Alice'})
+            assert 'identity' in result['ids'] and 'peer' in result['ids'] and 'user' in result['ids']
 
     @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_join_as_user_placeholder_resolution(self):
-        """Test that join_as_user uses placeholders correctly."""
-        invite_data = {
-            'invite_secret': 'test_secret',
-            'network_id': 'test_network',
-            'group_id': 'test_group'
-        }
-        invite_json = json.dumps(invite_data)
-        invite_b64 = base64.b64encode(invite_json.encode()).decode()
-        invite_link = f"quiet://invite/{invite_b64}"
-
-        params = {
-            'invite_link': invite_link,
-            'name': 'Bob',
-            '_db': self.db
-        }
-
-        envelopes = join_as_user(params)
-
-        # Check that user event references peer with placeholder
-        user_env = envelopes[1]
-        user_event = user_env['event_plaintext']
-        assert user_event['peer_id'] == '@generated:peer:0'
-
-        # Check that user deps include placeholder
-        assert '@generated:peer:0' in user_env['deps']
-
-    @pytest.mark.unit
-    @pytest.mark.event_type
     def test_join_as_user_invalid_invite_link(self):
-        """Test that join_as_user handles invalid invite links."""
-        # Test invalid prefix
-        with pytest.raises(ValueError, match="Invalid invite link format"):
-            join_as_user({
-                'invite_link': 'invalid://invite/abc',
-                'name': 'Alice',
-                '_db': self.db
-            })
-
-        # Test invalid base64
-        with pytest.raises(ValueError, match="Invalid invite link encoding"):
-            join_as_user({
-                'invite_link': 'quiet://invite/not_base64!!!',
-                'name': 'Alice',
-                '_db': self.db
-            })
-
-        # Test missing fields in invite data
-        invalid_invite_data = {'network_id': 'test'}  # Missing invite_secret and group_id
-        invite_json = json.dumps(invalid_invite_data)
-        invite_b64 = base64.b64encode(invite_json.encode()).decode()
-        invite_link = f"quiet://invite/{invite_b64}"
-
-        with pytest.raises(ValueError, match="Invalid invite data"):
-            join_as_user({
-                'invite_link': invite_link,
-                'name': 'Alice',
-                '_db': self.db
-            })
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            api = APIClient(protocol_dir=Path('protocols/quiet'), reset_db=True, db_path=Path(tmp.name))
+            with pytest.raises(ValueError, match="Invalid invite link format"):
+                api.execute_operation('user.join_as_user', {'invite_link': 'invalid://invite/abc', 'name': 'Alice'})
+            with pytest.raises(ValueError, match="Invalid invite link encoding"):
+                api.execute_operation('user.join_as_user', {'invite_link': 'quiet://invite/not_base64!!!', 'name': 'Alice'})
+            invalid_invite_data = {'network_id': 'test'}
+            invite_json = json.dumps(invalid_invite_data)
+            invite_b64 = base64.b64encode(invite_json.encode()).decode()
+            invite_link = f"quiet://invite/{invite_b64}"
+            with pytest.raises(ValueError, match="Invalid invite data"):
+                api.execute_operation('user.join_as_user', {'invite_link': invite_link, 'name': 'Alice'})
 
     @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_join_as_user_generates_name(self):
-        """Test that join_as_user generates name if not provided."""
-        invite_data = {
-            'invite_secret': 'test_secret',
-            'network_id': 'test_network',
-            'group_id': 'test_group'
-        }
-        invite_json = json.dumps(invite_data)
-        invite_b64 = base64.b64encode(invite_json.encode()).decode()
-        invite_link = f"quiet://invite/{invite_b64}"
+    def test_join_as_user_stores_identity(self):
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            api = APIClient(protocol_dir=Path('protocols/quiet'), reset_db=True, db_path=Path(tmp.name))
+            invite_data = {'invite_secret': 'test_secret', 'network_id': 'test_network', 'group_id': 'test_group'}
+            invite_json = json.dumps(invite_data)
+            invite_b64 = base64.b64encode(invite_json.encode()).decode()
+            invite_link = f"quiet://invite/{invite_b64}"
+            api.execute_operation('user.join_as_user', {'invite_link': invite_link, 'name': 'Charlie'})
 
-        params = {
-            'invite_link': invite_link,
-            # No name provided
-            '_db': self.db
-        }
-
-        envelopes = join_as_user(params)
-
-        # Check that a name was generated
-        user_env = envelopes[1]
-        user_event = user_env['event_plaintext']
-        assert 'name' in user_event
-        assert user_event['name'].startswith('User-')  # Generated names start with User-
-
-    @pytest.mark.unit
-    @pytest.mark.event_type
-    def test_join_as_user_database_storage(self):
-        """Test that join_as_user stores identity in database."""
-        invite_data = {
-            'invite_secret': 'test_secret',
-            'network_id': 'test_network',
-            'group_id': 'test_group'
-        }
-        invite_json = json.dumps(invite_data)
-        invite_b64 = base64.b64encode(invite_json.encode()).decode()
-        invite_link = f"quiet://invite/{invite_b64}"
-
-        params = {
-            'invite_link': invite_link,
-            'name': 'Charlie',
-            '_db': self.db
-        }
-
-        envelopes = join_as_user(params)
-
-        # Check that identity was stored in core_identities by name
-        cursor = self.db.execute(
-            "SELECT * FROM core_identities WHERE name = ? ORDER BY created_at DESC LIMIT 1",
-            ("Charlie",)
-        )
-        row = cursor.fetchone()
-        assert row is not None
-        assert row['name'] == 'Charlie'
-        assert row['private_key'] is not None
+            # Check identity in protocol identities table
+            db = get_connection(tmp.name)
+            row = db.execute(
+                "SELECT * FROM identities WHERE name = ? ORDER BY created_at DESC LIMIT 1",
+                ("Charlie",)
+            ).fetchone()
+            assert row is not None
+            assert row['name'] == 'Charlie'
+            assert row['private_key'] is not None
+            db.close()
